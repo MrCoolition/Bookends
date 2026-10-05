@@ -30,13 +30,13 @@ With a development or production server running on port 3000, `npm run test:e2e`
 - **Missions:** client mission cards, commercial state, funded demand, existing assignments, and open-demand filters.
 - **Decisions:** owned landing gaps, start prerequisites, unanswered updates, reported questions, and demo scenario review requests.
 - **My Bookends:** a person's itinerary, confirmed versus unknown next landing, evidence submission, and explicit acknowledgment of a specific update.
-- **Scenario studio:** date and allocation inputs; person and mission capacity validation; saved proposed moves; a separate demo review request. Nothing changes accepted staffing or sends a real notification.
+- **Scenario studio:** suggested dates and available hours, one-click conflict recovery, a fixed save bar, resumable unfinished forms, and editable saved moves. A separate demo review request leaves accepted staffing unchanged and sends no real notification.
 - **Presentation:** six scenes using the same baseline calculations, with scoped HOME selection, horizon, synthetic-name display controls, and keyboard navigation. This is a local presentation preview, not secure sharing or a frozen server-side snapshot.
 - **Appearance:** light, dark, and projector options. Light is the default. Reduced-motion preferences are respected.
 
 `Ctrl+K` opens command search. Escape closes dialogs. Native dialogs trap focus and return it to the initiating control. Person links use `?view=runway&person=p1`.
 
-Reset the synthetic workspace from **Appearance and demo settings → Reset demo workspace**. The versioned browser storage key is `bookends.synthetic-workspace.v1`; it must never be reused for real operational data.
+Reset the synthetic workspace from **Appearance and demo settings → Reset demo workspace**. This also clears unfinished planner forms. The versioned browser storage keys are `bookends.synthetic-workspace.v1` and `bookends.planner-draft.v1.*`; they must never be reused for real operational data. If browser storage is unavailable, unfinished forms survive closing and reopening for the current visit only.
 
 ## Code map
 
@@ -45,10 +45,12 @@ Reset the synthetic workspace from **Appearance and demo settings → Reset demo
 | `app/` | Next.js entry points, metadata, base responsive styling, visual theme |
 | `components/workspace.tsx` | Navigation, synthetic state, filters, commands, dialog routing |
 | `components/runway.tsx` | Timeline ribbons, alternate table, phone person cards |
-| `components/details.tsx` | Person and mission details, evidence, placement and scenario forms |
+| `components/details.tsx` | Person and mission details, evidence and scenario review |
+| `components/planner.tsx` | Guided placement form, recovery, editing and local draft persistence |
 | `components/views.tsx` | Missions, decisions, self-service, executive presentation |
 | `lib/data.ts` | Fixed-clock synthetic fixture, ten people and ten missions |
 | `lib/domain.ts` | Shared date, coverage, matching and proposal calculations |
+| `lib/planning.ts` | Available weekly hours and feasible placement suggestions |
 | `tests/` | Domain edge cases and browser user stories |
 | `docs/production-boundary.md` | Explicit implementation boundary and production requirements |
 
@@ -58,7 +60,7 @@ Business intervals are stored as `[start, end)` and displayed with an inclusive 
 
 Only commercially authorized, committed assignments count toward confirmed funded coverage. A blocked start retains its accepted capacity reservation. Proposed work and scenario moves do not count as confirmed coverage. Contractor unassigned hours are availability, not W2 bench. Evidence submission remains awaiting independent verification, and acknowledgment is not assignment acceptance.
 
-The synthetic planner supports quarter-hour weekly inputs. These browser calculations are previews, not a production concurrency or security boundary. Full calendar exceptions, per-day allocation patterns, exact database numeric arithmetic, funding caps, and transactional approval remain production work.
+The synthetic planner supports quarter-hour weekly inputs. Suggestions prefer the highest feasible hours, then the longest uninterrupted working-day window, accounting for committed staffing and other saved scenario moves. Editing a move excludes its own allocation from the capacity check. Suggestions check scheduling, not readiness or approval. These browser calculations are previews, not a production concurrency or security boundary. Full calendar exceptions, per-day allocation patterns, exact database numeric arithmetic, funding caps, and transactional approval remain production work.
 
 ## Deployment
 

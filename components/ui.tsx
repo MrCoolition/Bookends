@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, type ReactNode, type CSSProperties } from "react";
-import { X, ArrowUpRight, Check, Circle, AlertTriangle } from "lucide-react";
+import { X, ArrowLeft, ArrowUpRight, Check, Circle, AlertTriangle } from "lucide-react";
 import { HOME_META } from "@/lib/data";
 import type { Home, Person } from "@/lib/types";
 
@@ -12,7 +12,7 @@ export function Status({ type, children }: { type?: "good" | "warning" | "blocke
   const Icon = type === "good" ? Check : type === "blocked" ? AlertTriangle : Circle;
   return <span className={`status status-${type || "muted"}`}><Icon size={11} />{children}</span>;
 }
-export function Modal({ title, eyebrow, children, onClose, wide = false, fullscreen = false }: { title: string; eyebrow?: string; children: ReactNode; onClose: () => void; wide?: boolean; fullscreen?: boolean }) {
+export function Modal({ title, eyebrow, children, onClose, onBack, className = "", wide = false, fullscreen = false }: { title: string; eyebrow?: string; children: ReactNode; onClose: () => void; onBack?: () => void; className?: string; wide?: boolean; fullscreen?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const el = ref.current;
@@ -22,8 +22,8 @@ export function Modal({ title, eyebrow, children, onClose, wide = false, fullscr
     document.body.style.overflow = "hidden";
     return () => { el?.close(); document.body.style.overflow = overflow; previous?.focus(); };
   }, []);
-  return <dialog ref={ref} className={`modal ${wide ? "modal-wide" : ""} ${fullscreen ? "modal-full" : ""}`} onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }} aria-labelledby="modal-title">
-    <div className="modal-inner"><header className="modal-header"><div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h2 id="modal-title">{title}</h2></div><button className="icon-button close-button" onClick={onClose} aria-label="Close dialog"><X size={20} /></button></header>{children}</div>
+  return <dialog ref={ref} className={`modal ${wide ? "modal-wide" : ""} ${fullscreen ? "modal-full" : ""} ${className}`} onCancel={event => { event.preventDefault(); onClose(); }} onClick={event => { if (event.target !== event.currentTarget) return; const bounds = event.currentTarget.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose(); }} aria-labelledby="modal-title">
+    <div className="modal-inner"><header className="modal-header">{onBack && <button className="icon-button modal-back" onClick={onBack} aria-label="Back to previous view"><ArrowLeft size={19}/></button>}<div className="modal-heading">{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h2 id="modal-title">{title}</h2></div><button className="icon-button close-button" onClick={onClose} aria-label="Close dialog"><X size={20} /></button></header>{children}</div>
   </dialog>;
 }
 export function EmptyState({ title, detail, onReset }: { title: string; detail: string; onReset?: () => void }) { return <div className="empty-state"><span className="empty-orbit">◎</span><h3>{title}</h3><p>{detail}</p>{onReset && <button className="button button-secondary" onClick={onReset}>Reset filters <ArrowUpRight size={16} /></button>}</div>; }
