@@ -1,6 +1,6 @@
 # Everyday administration
 
-Open **Administration** from the signed-in journey workspace. Workspace administrators manage company configuration here. Teammates and scoped operational reviewers continue to use their journey views.
+Open **Admin** in the app's main navigation, or **Administration** from the signed-in journey workspace. You can also find it through command search or appearance settings. Before sign-in and database setup are complete, the dedicated Administration page shows the available sections and the remaining setup. It never opens real records to an unsigned visitor. Workspace administrators manage company configuration here after activation. Teammates and scoped operational reviewers continue to use their journey views.
 
 ## Initial setup order
 
