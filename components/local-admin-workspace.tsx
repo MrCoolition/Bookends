@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { AlertCircle, ArrowLeft, Check, Download, Monitor, RefreshCw, Upload, X } from "lucide-react";
 import { AdminWorkspace } from "./admin-workspace";
+import { AdminSpreadsheetImport } from "./admin-spreadsheet-import";
+import type { SpreadsheetImportPlan } from "@/lib/admin/spreadsheet";
 import { applyLocalAdminCommand, createLocalAdminStore, parseLocalAdminStore, MAX_LOCAL_ADMIN_BYTES, type LocalAdminCommand, type LocalAdminStore } from "@/lib/admin/local";
 
 const STORAGE_KEY = "bookends.local-admin.v1";
@@ -45,6 +47,8 @@ export function LocalAdminWorkspace() {
   const [busy, setBusy] = useState(false);
   const writeBusy = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const spreadsheetReview = useRef<{ plan: SpreadsheetImportPlan; expectedRaw: string } | null>(null);
+  const spreadsheetAttempt = useRef(0);
   const accept = (next: LocalAdminStore, raw: string) => { storeRef.current = next; rawRef.current = raw; setStore(next); setChangedElsewhere(false); setLoadError(""); };
 
   useEffect(() => {
@@ -120,7 +124,40 @@ export function LocalAdminWorkspace() {
     finally { writeBusy.current = false; setBusy(false); }
   };
 
-  const controls = <section className="admin-local-bar" aria-label="Browser-local setup"><div className="admin-local-label"><Monitor size={19} /><div><strong>Open setup <span aria-hidden="true">•</span> {store ? "Saved in this browser" : "Browser storage"}</strong><p>These records stay in this browser. They are not shared or connected to company sign-in.</p></div></div><div className="admin-local-actions"><button className="admin-button admin-secondary" onClick={exportBackup} disabled={!store || busy}><Download size={15} /> Export setup</button><button className="admin-button admin-secondary" onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={15} /> Import setup</button><input ref={fileRef} className="admin-local-file" type="file" accept="application/json,.json" aria-label="Choose a BOOKENDS backup" onChange={event => void chooseBackup(event)} /></div>{changedElsewhere && <p className="admin-local-warning" role="status"><AlertCircle size={15} /> Another tab changed this setup. Use Refresh to load it; your open draft stays in place for review.</p>}{backupError && !backup && <p className="admin-error" role="alert">{backupError}</p>}{notice && <p className="admin-local-notice" role="status"><Check size={14} />{notice}</p>}</section>;
+  const previewSpreadsheet = async (file: File) => {
+    const attempt = ++spreadsheetAttempt.current;
+    const current = storeRef.current; const expectedRaw = rawRef.current;
+    spreadsheetReview.current = null;
+    if (!current || expectedRaw === null) throw new Error("Open your saved setup before importing Excel.");
+    if (savedRaw() !== expectedRaw) { setChangedElsewhere(true); throw new LocalConflict("Another tab changed your setup. Close this review, refresh your records, then choose the workbook again."); }
+    const { readSpreadsheetFile, planSpreadsheetImport } = await import("@/lib/admin/spreadsheet");
+    const workbook = await readSpreadsheetFile(file);
+    const plan = planSpreadsheetImport(current, workbook);
+    if (attempt !== spreadsheetAttempt.current) throw new Error("This review was closed. Choose a workbook to begin again.");
+    if (savedRaw() !== expectedRaw || rawRef.current !== expectedRaw) { setChangedElsewhere(true); throw new LocalConflict("Your setup changed while the workbook was being checked. Close this review, refresh, and choose the workbook again."); }
+    spreadsheetReview.current = { plan, expectedRaw };
+    return plan;
+  };
+  const applySpreadsheet = async (plan: SpreadsheetImportPlan) => {
+    const review = spreadsheetReview.current;
+    if (!review || review.plan !== plan) throw new Error("Choose your workbook again to prepare a current import review.");
+    if (plan.errors.length) throw new Error("Correct the workbook issues before applying this import.");
+    if (writeBusy.current) throw new Error("Another change is being saved. Please try again in a moment.");
+    writeBusy.current = true; setBusy(true);
+    try {
+      const { applySpreadsheetImport } = await import("@/lib/admin/spreadsheet");
+      await withWriteLock(() => {
+        const currentRaw = savedRaw();
+        if (currentRaw !== review.expectedRaw) { setChangedElsewhere(true); throw new LocalConflict("Setup changed after this workbook was reviewed. Close this review, refresh, and choose the workbook again. Nothing from this import was saved."); }
+        const next = applySpreadsheetImport(readSaved(currentRaw), plan);
+        accept(next, persist(next));
+      });
+      spreadsheetReview.current = null;
+      setNotice(`Excel import saved in this browser: ${plan.counts.adds} added, ${plan.counts.updates} updated, ${plan.counts.skips} unchanged.`);
+    } finally { writeBusy.current = false; setBusy(false); }
+  };
+
+  const controls = <section className="admin-local-bar" aria-label="Browser-local setup"><div className="admin-local-label"><Monitor size={19} /><div><strong>Open setup <span aria-hidden="true">•</span> {store ? "Saved in this browser" : "Browser storage"}</strong><p>These records stay in this browser. They are not shared or connected to company sign-in.</p></div></div><AdminSpreadsheetImport disabled={!store || busy} onPreview={previewSpreadsheet} onApply={applySpreadsheet} onDiscard={() => { spreadsheetAttempt.current++; spreadsheetReview.current = null; }} /><div className="admin-local-actions admin-local-backups"><span>JSON backup</span><button className="admin-button admin-secondary" onClick={exportBackup} disabled={!store || busy}><Download size={15} /> Export setup</button><button className="admin-button admin-secondary" onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={15} /> Import setup</button><input ref={fileRef} className="admin-local-file" type="file" accept="application/json,.json" aria-label="Choose a BOOKENDS backup" onChange={event => void chooseBackup(event)} /></div>{changedElsewhere && <p className="admin-local-warning" role="status"><AlertCircle size={15} /> Another tab changed this setup. Use Refresh to load it; your open draft stays in place for review.</p>}{backupError && !backup && <p className="admin-error" role="alert">{backupError}</p>}{notice && <p className="admin-local-notice" role="status"><Check size={14} />{notice}</p>}</section>;
 
   return <>{store ? <AdminWorkspace initialData={store.data} localTransport={{ save, refresh }} localControls={controls} /> : <div className="admin-workspace admin-local-loading"><header className="admin-topbar"><a className="admin-brand" href="/"><span>[<i />]</span> BOOKENDS</a><div><a href="/" className="admin-back"><ArrowLeft size={15} /> Back to app</a></div></header>{controls}<main className="admin-main"><h1>Administration</h1>{loadError ? <><p className="admin-error" role="alert">{loadError}</p><button className="admin-button admin-primary" onClick={() => { setLoadError(""); setLoadAttempt(value => value + 1); }}><RefreshCw size={16} /> Try opening setup again</button></> : <p role="status">Opening your saved browser setup…</p>}</main></div>}{backup && <BackupDialog backup={backup} current={store} busy={busy} error={backupError} onClose={() => { if (!busy) { setBackup(null); setBackupError(""); } }} onReplace={() => void replaceWithBackup()} />}</>;
 }

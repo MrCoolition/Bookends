@@ -10,6 +10,31 @@ Changes save in this browser on this site. They survive a refresh, but do not sy
 
 This mode is selected by `BOOKENDS_ADMIN_MODE=local`. Set it to `protected` to return to sign-in. `BOOKENDS_MODE=production` always uses protected administration. The operational API and database remain separate; importing a local backup does not activate accounts or publish policies to them.
 
+## Fill setup from Excel
+
+Use **Download Excel template** at the top of Admin. The workbook includes a short **Start here** guide and four blank input tabs. Paste values starting on row 5; keep the sheet names and row-4 headers. The first two columns of every input tab are required.
+
+| Tab | Required columns | Optional columns |
+| --- | --- | --- |
+| HOMEs | HOME code, HOME name | Description |
+| Clients | Client code, Client name | Contact name, Contact email, Notes |
+| People | Person name, HOME code | Owner name |
+| Missions | Mission name, Client code | — |
+
+Enter your HOME and client codes once, then reuse those codes in People and Missions. The importer connects records across tabs in the same workbook. Leave Owner name blank to use the workspace owner, or enter an existing active local member's exact name. Use values rather than formulas. You can fill one tab at a time or all four together, up to 1,000 records per section and a 5 MiB workbook.
+
+Choose **Import Excel**, select the saved `.xlsx`, and review the additions, updates, and unchanged rows. Errors name the sheet, row, and column to fix. No part of a workbook is saved while any issue remains. After reviewing a valid batch, check the confirmation and choose **Apply import**. If another tab changes setup, refresh and review the workbook again.
+
+Imports merge into the setup already saved in this browser:
+
+- HOMEs and clients match by their stable code. Reimporting changed fields updates the same record and preserves its links.
+- People match by exact name plus HOME code; missions match by exact name plus client code. Rename or transfer existing people and missions through their Admin forms to avoid creating a second record.
+- Matching unchanged rows are skipped. Records absent from the workbook are kept; the import never deletes or archives records.
+- Blank optional cells clear those fields on matching records. A blank Owner name selects the workspace owner. Review the individual field changes before applying an update.
+- Archived matches, duplicate keys, missing references, formulas, and unexpected populated columns must be corrected first.
+
+Excel imports stay in this browser, just like manual setup. **Export setup** under **JSON backup** saves the complete configuration, including playbooks and local roles. Excel is for adding or updating the four core lists; **Import setup** restores a whole JSON backup and replaces the local setup after review.
+
 ## Connected administration later
 
 After identity and database activation, **Administration** in the signed-in journey workspace manages shared company configuration. Teammates and scoped operational reviewers use their journey views. Local setup needs an explicit reviewed migration into that shared workspace; it is never promoted automatically.
