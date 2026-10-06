@@ -36,7 +36,7 @@ test("the protected entry point and fictional preview stay separate", async ({ p
   await expect(page.locator(".workspace")).toBeVisible();
 });
 
-test("administration records remain inaccessible while its setup page is visible", async ({ request, page }) => {
+test("open local administration does not grant access to server administration", async ({ request, page }) => {
   const response = await request.get("/api/admin", { headers: { "x-bookends-role": "administrator" } });
   expect(response.status()).toBe(401);
   expect(response.headers()["cache-control"]).toContain("no-store");
@@ -45,8 +45,8 @@ test("administration records remain inaccessible while its setup page is visible
   expect(mutation.status()).toBe(403);
   await page.goto("/admin");
   await expect(page).toHaveURL(/\/admin$/);
-  await expect(page.locator(".admin-access-gateway")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Administration", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add client", exact: true }).first()).toBeVisible();
+  await expect(page.locator(".admin-access-gateway")).toHaveCount(0);
   await expect(page.locator(".admin-records")).toHaveCount(0);
 });
 
@@ -55,8 +55,8 @@ test("Administration is discoverable from the app navigation and command search"
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Administration", exact: true }).click();
   await expect(page).toHaveURL(/\/admin$/);
   for (const name of ["Clients", "HOMEs", "People", "Missions", "Playbooks", "Access & settings"])
-    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
-  await expect(page.getByText(/setup/i).first()).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Administration sections" }).getByRole("button", { name: new RegExp(name) })).toBeVisible();
+  await expect(page.getByText(/saved in this browser/i).first()).toBeVisible();
   await page.goto("/");
   await page.keyboard.press("Control+k");
   await page.getByRole("textbox", { name: "Search everything" }).fill("admin");
@@ -70,7 +70,7 @@ test("Administration remains reachable from phone navigation and appearance sett
   await page.getByRole("button", { name: "Toggle navigation", exact: true }).click();
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Administration", exact: true }).click();
   await expect(page).toHaveURL(/\/admin$/);
-  await expect(page.getByRole("heading", { name: "Administration", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add client", exact: true }).first()).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
   await page.goto("/");
   await page.getByRole("button", { name: "Toggle navigation", exact: true }).click();

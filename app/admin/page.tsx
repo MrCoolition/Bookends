@@ -6,6 +6,8 @@ import { databaseConfigured, withMember } from "@/lib/operations/db";
 import { OperationsError } from "@/lib/operations/service";
 import { loadAdmin } from "@/lib/admin/service";
 import { AdminWorkspace } from "@/components/admin-workspace";
+import { LocalAdminWorkspace } from "@/components/local-admin-workspace";
+import { localAdministrationEnabled } from "@/lib/admin/mode";
 import { signIn, signOut, CORPORATE_PROVIDER_ID } from "@/auth";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +22,7 @@ const SECTIONS = [
 ];
 
 export default async function AdminPage() {
+  if (localAdministrationEnabled()) return <LocalAdminWorkspace />;
   const authConfigured = getAuthConfigurationStatus().configured;
   const dbConfigured = databaseConfigured();
   const configured = authConfigured && dbConfigured;

@@ -1,6 +1,8 @@
 # Production implementation boundary — journey release
 
-The release now includes an authenticated, database-backed journey implementation at `/journeys`, alongside the fictional staffing preview at `/demo`. **Operational activation and full V1 acceptance remain outstanding.** The organization has not chosen its sign-in system or email provider. No real Neon schema or identities have been provisioned by this release. Follow [production setup](production-setup.md) before admitting real records.
+The release includes an authenticated, database-backed journey implementation at `/journeys`, alongside the fictional staffing preview at `/demo`. **Operational activation and full V1 acceptance remain outstanding.** The organization has not chosen its sign-in system or email provider. No real Neon schema or identities have been provisioned by this release. Follow [production setup](production-setup.md) before admitting shared operational records.
+
+At the user's request, `/admin` currently opens a separate browser-local setup workspace without sign-in (`BOOKENDS_ADMIN_MODE=local`). Client/HOME/people/mission configuration, playbooks, workspace name, and planned local roles can be edited and backed up with JSON export/import. These changes are not shared between devices, do not update the staffing preview or operational database, and confer no authenticated permissions. Production mode always restores protected administration. Local backups require a future reviewed migration into shared storage.
 
 ## New journey implementation
 

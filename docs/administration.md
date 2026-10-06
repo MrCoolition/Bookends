@@ -1,6 +1,18 @@
 # Everyday administration
 
-Open **Admin** in the app's main navigation, or **Administration** from the signed-in journey workspace. You can also find it through command search or appearance settings. Before sign-in and database setup are complete, the dedicated Administration page shows the available sections and the remaining setup. It never opens real records to an unsigned visitor. Workspace administrators manage company configuration here after activation. Teammates and scoped operational reviewers continue to use their journey views.
+Open **Admin** in the app's main navigation. You can also find it through command search or appearance settings.
+
+## Open setup now
+
+The current release enables local administration without sign-in. All six sections are editable. Start with your company name, HOMEs, and clients, then connect people and missions. Access entries are planned local roles; they do not create sign-in accounts or grant server permissions.
+
+Changes save in this browser on this site. They survive a refresh, but do not sync to another browser, device, or the fictional staffing preview. Use **Export setup** to keep a JSON backup. **Import setup** validates a backup and asks before replacing this browser's configuration. Clearing browser storage removes the local copy. A failed browser save is reported instead of claiming success.
+
+This mode is selected by `BOOKENDS_ADMIN_MODE=local`. Set it to `protected` to return to sign-in. `BOOKENDS_MODE=production` always uses protected administration. The operational API and database remain separate; importing a local backup does not activate accounts or publish policies to them.
+
+## Connected administration later
+
+After identity and database activation, **Administration** in the signed-in journey workspace manages shared company configuration. Teammates and scoped operational reviewers use their journey views. Local setup needs an explicit reviewed migration into that shared workspace; it is never promoted automatically.
 
 ## Initial setup order
 

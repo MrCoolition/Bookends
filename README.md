@@ -6,7 +6,7 @@ This repository contains the **synthetic staffing preview** at `/demo` and an **
 
 Until operational activation, `/` remains the fictional design preview. Do not enter real employee or client information there. Setting `BOOKENDS_MODE=production` routes `/` to the protected journey workspace; `/demo` stays explicitly synthetic.
 
-Authorized administrators use `/admin` for clients, HOMEs, people, missions, versioned playbooks, account access, and organization settings. Searchable forms support editing and reversible archiving. See [everyday administration](docs/administration.md).
+`/admin` provides clients, HOMEs, people, missions, versioned playbooks, role planning, and organization settings. The current interim release sets `BOOKENDS_ADMIN_MODE=local` so the forms open without sign-in and save to this browser, with JSON export/import. This configuration is separate from the synthetic staffing preview and the protected operational database. Shared administration still requires activation; `BOOKENDS_MODE=production` always uses the protected workspace. See [everyday administration](docs/administration.md).
 
 ## Run locally
 

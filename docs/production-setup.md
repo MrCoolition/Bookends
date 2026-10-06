@@ -2,6 +2,8 @@
 
 This procedure applies to `/journeys`. None of these database or identity provisioning steps run automatically during deployment. The current release is not operationally activated.
 
+For interim configuration work, `/admin` can run with `BOOKENDS_ADMIN_MODE=local` and save without sign-in in this browser. See [everyday administration](administration.md) for backup and import. This is separate from the procedure below. Set `BOOKENDS_ADMIN_MODE=protected` when moving to shared administration; `BOOKENDS_MODE=production` also forces the protected path. Preserve local backups and explicitly review/migrate their configuration before changing modes.
+
 ## Isolated environments and credentials
 
 Use separate empty development, preview, and production databases/branches and separate identity registrations. Never copy real teammate records into a preview. Set variables in the matching deployment environment. Updated Vercel variables apply to a new deployment; see [Vercel environment variables](https://vercel.com/docs/environment-variables).
