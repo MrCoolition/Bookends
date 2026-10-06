@@ -2,7 +2,11 @@
 
 A visual resource-alignment workspace for people, missions, and the transitions between them. The design uses warm paper, ink, cobalt, and vermilion, with distinct HOME colors and patterned proposals.
 
-This repository currently delivers an **interactive product demonstration**, not the specification's complete production V1. All people, clients, assignments, and messages are synthetic. Demo edits persist only in this browser. No Neon database, corporate identity provider, real approval workflow, or email transport is connected. Do not enter real employee or client information.
+This repository contains the **synthetic staffing preview** at `/demo` and an **authenticated journey workspace** at `/journeys`. The latter implements server-persisted company and mission onboarding/offboarding, policy approval, prerequisites, independent evidence verification, and in-app acknowledgments. Sign-in and a restricted PostgreSQL runtime connection must be configured before it admits real records. Infrastructure activation and the specification's full production V1 acceptance remain outstanding. See [production setup](docs/production-setup.md) and the [implementation boundary](docs/production-boundary.md).
+
+Until operational activation, `/` remains the fictional design preview. Do not enter real employee or client information there. Setting `BOOKENDS_MODE=production` routes `/` to the protected journey workspace; `/demo` stays explicitly synthetic.
+
+Authorized administrators use `/admin` for clients, HOMEs, people, missions, versioned playbooks, account access, and organization settings. Searchable forms support editing and reversible archiving. See [everyday administration](docs/administration.md).
 
 ## Run locally
 
@@ -51,6 +55,12 @@ Reset the synthetic workspace from **Appearance and demo settings → Reset demo
 | `lib/data.ts` | Fixed-clock synthetic fixture, ten people and ten missions |
 | `lib/domain.ts` | Shared date, coverage, matching and proposal calculations |
 | `lib/planning.ts` | Available weekly hours and feasible placement suggestions |
+| `components/production-workspace.tsx` | Company and mission journeys, step ownership, help, evidence, verification, in-app updates |
+| `components/admin-workspace.tsx`, `lib/admin/` | Configuration forms, scoped administration commands, versioning and account management |
+| `lib/journeys/` | Versioned playbooks, prerequisite transitions, scoped action readiness |
+| `lib/operations/` | Strict commands, authenticated membership, SQL transactions, redacted projections |
+| `auth.ts`, `lib/auth/` | Fixed-issuer OIDC sign-in and server identity |
+| `db/`, `scripts/` | Reviewed migration, Drizzle schema, explicit administration commands |
 | `tests/` | Domain edge cases and browser user stories |
 | `docs/production-boundary.md` | Explicit implementation boundary and production requirements |
 
@@ -64,6 +74,6 @@ The synthetic planner supports quarter-hour weekly inputs. Suggestions prefer th
 
 ## Deployment
 
-The app builds as a standard Next.js project on Vercel. Use `npm ci`, `npm run build`, and the Next.js framework preset. No environment variables are needed for the synthetic demo. Never attach production operational data to this unauthenticated build.
+The app builds as a standard Next.js project on Vercel. Use `npm ci`, `npm run verify`, and the Next.js framework preset. The release command checks TypeScript, domain and database/service tests, then builds. No environment variables are needed for the synthetic preview. Operational variables are documented in `.env.example`; actual values belong only in ignored local files and deployment secrets.
 
-The connected Vercel project deploys pushes to `main`. `vercel.json` explicitly selects Next.js and the lockfile-based build. Deploying this demo does not configure or migrate Neon and does not enable real approvals or email. The supplied developer specification remains the source for production acceptance; the current demo does not claim to pass that acceptance suite.
+The connected Vercel project deploys pushes to `main`. A deployment never runs migrations or provisions identities. Email delivery, transactional staffing, and external employment/access changes are not enabled by the journey workspace. The supplied developer specification remains the source for full V1 acceptance.

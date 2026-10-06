@@ -1,0 +1,202 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { readFile, readdir } from "node:fs/promises";
+import { PGlite } from "@electric-sql/pglite";
+import { executeAdmin, loadAdmin } from "../lib/admin/service";
+import { adminRequestSchema } from "../lib/admin/validation";
+import type { AdminCommand, AdminMember } from "../lib/admin/contracts";
+import { executeOperation, loadOperations, type Membership, type OperationsQuery } from "../lib/operations/service";
+import { operationsRequestSchema } from "../lib/operations/validation";
+import type { OperationsCommand } from "../lib/operations/contracts";
+import { getJourneyTemplate } from "../lib/journeys/templates";
+
+const migrations = new URL("../db/migrations/", import.meta.url);
+const issuer = "https://identity.example.test/synthetic";
+function code(expected: string) { return (error: unknown) => !!error && typeof error === "object" && "code" in error && error.code === expected; }
+async function fixture() {
+  const db = new PGlite();
+  for (const file of (await readdir(migrations)).filter(file => file.endsWith(".sql")).sort()) await db.exec(await readFile(new URL(file, migrations), "utf8"));
+  const org = randomUUID(), otherOrg = randomUUID(), resourceId = randomUUID();
+  const member = (name: string, role: Membership["role"], extra: Partial<Membership> = {}): Membership => ({ id: randomUUID(), organization_id: org, issuer, subject: randomUUID(), name, role, home_scope: null, resource_id: null, grants: [], active: true, ...extra });
+  const admin = member("Synthetic administrator", "administrator");
+  const reviewer = member("Synthetic independent reviewer", "mission_owner", { grants: ["asset_access_owner", "administrator"].map(role => ({ role: role as "asset_access_owner" | "administrator", scope: { organizationId: org } })) });
+  const worker = member("Synthetic teammate", "resource");
+  const foreign = member("Synthetic other organization administrator", "administrator", { organization_id: otherOrg });
+  await db.query("INSERT INTO be_organizations(id,name) VALUES($1,'Synthetic operations'),($2,'Synthetic other organization')", [org,otherOrg]);
+  await db.query("INSERT INTO be_homes(organization_id,id,code,name) VALUES($1,$3,'Data','Data'),($1,$4,'AI','Artificial Intelligence'),($2,$5,'Data','Other Data')", [org,otherOrg,randomUUID(),randomUUID(),randomUUID()]);
+  for (const m of [admin,reviewer,worker,foreign]) await db.query("INSERT INTO be_memberships(id,organization_id,issuer,subject,name,role,grants) VALUES($1,$2,$3,$4,$5,$6,$7)", [m.id,m.organization_id,m.issuer,m.subject,m.name,m.role,JSON.stringify(m.grants)]);
+  await db.query("INSERT INTO be_resources(organization_id,id,name,home,owner_id) VALUES($1,$2,'Synthetic teammate','Data',$3)", [org,resourceId,admin.id]);
+  await db.query("UPDATE be_memberships SET resource_id=$2 WHERE id=$1", [worker.id,resourceId]); worker.resource_id = resourceId;
+  async function transaction<T>(acting: Membership, work: (query: OperationsQuery) => Promise<T>) {
+    return db.transaction(async tx => {
+      await tx.exec("SET LOCAL ROLE be_runtime");
+      await tx.query("SELECT set_config('bookends.organization_id',$1,true),set_config('bookends.actor_id',$2,true),set_config('bookends.issuer',$3,true),set_config('bookends.subject',$4,true)", [acting.organization_id,acting.id,acting.issuer,acting.subject]);
+      return work(tx as unknown as OperationsQuery);
+    });
+  }
+  const load = (acting=admin) => transaction(acting, query => loadAdmin(query,acting));
+  const operations = (acting=admin) => transaction(acting, query => loadOperations(query,acting));
+  const execute = (command: AdminCommand, key=randomUUID(), acting=admin) => transaction(acting, query => executeAdmin(query,acting,adminRequestSchema.parse({idempotencyKey:key,command})));
+  const operation = (command: OperationsCommand, acting=admin) => transaction(acting, query => executeOperation(query,acting,operationsRequestSchema.parse({idempotencyKey:randomUUID(),command})));
+  async function client(name="Synthetic client", clientCode="synthetic-client") {
+    await execute({type:"save_client",name,code:clientCode,contactName:"Synthetic contact",contactEmail:"synthetic@example.test",notes:"Private synthetic client note"});
+    return (await load()).clients.find(c=>c.code===clientCode)!;
+  }
+  async function playbook() {
+    const catalog=getJourneyTemplate("mission_onboarding");
+    await execute({type:"save_playbook",kind:catalog.kind,name:"Our welcoming arrival",description:catalog.description,sourceReference:"policy://synthetic/approved-source",requirements:catalog.requirements});
+    const draft=(await load()).templates.find(t=>t.persisted)!;
+    await execute({type:"approve_playbook",id:draft.id,expectedRevision:draft.revision});
+    return (await load()).templates.find(t=>t.id===draft.id)!;
+  }
+  async function journey() {
+    const c=await client(), template=await playbook();
+    await execute({type:"save_mission",name:"Synthetic mission",clientId:c.id});
+    const mission=(await load()).missions[0];
+    await operation({type:"create_journey",resourceId,templateId:template.id,missionId:mission.id,assignmentReference:"assignment://synthetic/approved/1",ownerId:admin.id,fulfillerId:worker.id,verifierId:reviewer.id,openingAt:null,releaseAt:null,closeoutAt:null});
+    return {client:c,template,mission,journey:(await operations()).journeys[0]};
+  }
+  return {db,org,otherOrg,admin,reviewer,worker,foreign,resourceId,transaction,load,operations,execute,operation,client,playbook,journey};
+}
+
+test("administration requires the primary unscoped administrator and returns only same-organization safe projections", async t => {
+  const f=await fixture();t.after(()=>f.db.close());
+  await f.client();
+  const data=await f.load();
+  assert.equal(data.viewer.id,f.admin.id);
+  assert.equal(data.templates.filter(t=>!t.persisted).length,4);
+  assert.equal(JSON.stringify(data).includes(issuer),false);
+  assert.equal(JSON.stringify(data).includes(f.worker.subject),false);
+  assert.deepEqual((await f.load(f.foreign)).clients,[]);
+  for(const actor of [f.worker,f.reviewer,{...f.admin,home_scope:"Data"},{...f.admin,active:false}]) {
+    await assert.rejects(f.load(actor),code("forbidden"));
+    await assert.rejects(f.execute({type:"set_organization",name:"Unauthorized",expectedRevision:1},randomUUID(),actor),code("forbidden"));
+  }
+  await f.execute({type:"set_organization",name:"Clear new display name",expectedRevision:1});
+  assert.equal((await f.load()).organization.name,"Clear new display name");
+  await assert.rejects(f.execute({type:"set_organization",name:"Stale",expectedRevision:1}),code("conflict"));
+});
+
+test("clients support audited idempotent edits, stable codes, active dependencies, and retained archive history", async t => {
+  const f=await fixture();t.after(()=>f.db.close());
+  const client=await f.client();
+  const edit:AdminCommand={type:"save_client",id:client.id,expectedRevision:1,name:"Renamed client",code:client.code,contactName:"New contact",contactEmail:"new@example.test",notes:"Private updated note"};
+  const key=randomUUID();await f.execute(edit,key);await f.execute(edit,key);
+  assert.equal((await f.load()).clients[0].revision,2);
+  assert.equal((await f.db.query<{count:number}>("SELECT count(*)::int AS count FROM be_events WHERE operation='admin.save_client'")).rows[0].count,2);
+  const events=JSON.stringify((await f.db.query("SELECT payload FROM be_events")).rows);
+  assert.equal(events.includes("Private"),false);assert.equal(events.includes("new@example"),false);
+  await assert.rejects(f.execute(edit),code("conflict"));
+  await assert.rejects(f.execute({...edit,name:"Other"},key),code("idempotency_conflict"));
+  await assert.rejects(f.execute({...edit,expectedRevision:2,code:"changed"}),code("immutable_code"));
+  await f.operation({type:"create_mission",name:"Configured mission",clientId:client.id});
+  let mission=(await f.load()).missions[0];
+  await assert.rejects(f.execute({type:"set_client_active",id:client.id,expectedRevision:2,active:false}),code("active_dependents"));
+  await f.execute({...edit,expectedRevision:2,name:"Client final name"});
+  assert.equal((await f.operations()).missions[0].clientName,"Client final name");
+  mission=(await f.load()).missions[0];
+  await f.execute({type:"set_mission_active",id:mission.id,expectedRevision:mission.revision,active:false});
+  await f.execute({type:"set_client_active",id:client.id,expectedRevision:3,active:false});
+  assert.equal((await f.load()).clients[0].active,false);
+  assert.deepEqual((await f.operations()).clients,[]);
+  await assert.rejects(f.operation({type:"create_mission",name:"Archived client mission",clientId:client.id}),code("invalid_client"));
+  await assert.rejects(f.execute({type:"set_mission_active",id:mission.id,expectedRevision:mission.revision+1,active:true}),code("invalid_client"));
+  await f.execute({type:"set_client_active",id:client.id,expectedRevision:4,active:true});
+  await f.execute({type:"set_mission_active",id:mission.id,expectedRevision:mission.revision+1,active:true});
+  assert.equal((await f.operations()).missions[0].active,true);
+});
+
+test("HOME and client scope cannot rewrite existing journey history, while archived journeys stay visible", async t => {
+  const f=await fixture();t.after(()=>f.db.close());
+  const current=await f.journey();
+  assert.equal(current.journey.scope.clientId,current.client.id);
+  const otherClient=await f.client("Other client","other-client");
+  await assert.rejects(f.execute({type:"save_mission",id:current.mission.id,expectedRevision:1,name:"Moved mission",clientId:otherClient.id}),code("historical_scope"));
+  await assert.rejects(f.execute({type:"save_resource",id:f.resourceId,expectedRevision:1,name:"Moved teammate",home:"AI",ownerId:f.admin.id}),code("historical_scope"));
+  await assert.rejects(f.operation({type:"create_resource",name:"Unknown HOME",home:"Unconfigured",ownerId:f.admin.id}),code("invalid_home"));
+  await assert.rejects(f.execute({type:"save_resource",name:"Wrong owner",home:"Data",ownerId:f.worker.id}),code("invalid_owner_scope"));
+  const dataHome=(await f.load()).homes.find(h=>h.code==="Data")!;
+  await assert.rejects(f.execute({type:"set_home_active",id:dataHome.id,expectedRevision:1,active:false}),code("active_dependents"));
+  await f.execute({type:"set_resource_active",id:f.resourceId,expectedRevision:1,active:false});
+  const retained=await f.operations();
+  assert.equal(retained.resources.find(r=>r.id===f.resourceId)!.active,false);
+  assert.deepEqual(retained.journeys[0],current.journey);
+  await assert.rejects(f.operation({type:"create_journey",resourceId:f.resourceId,templateId:current.template.id,missionId:current.mission.id,assignmentReference:"another",ownerId:f.admin.id,fulfillerId:f.worker.id,verifierId:f.reviewer.id,openingAt:null,releaseAt:null,closeoutAt:null}),code("inactive_resource"));
+  await f.execute({type:"save_home",code:"New",name:"A new HOME",description:"A new practice"});
+  const newHome=(await f.load()).homes.find(h=>h.code==="New")!;
+  await f.execute({type:"save_home",id:newHome.id,expectedRevision:1,code:"New",name:"Renamed HOME",description:"Clear description"});
+  await f.execute({type:"set_home_active",id:newHome.id,expectedRevision:2,active:false});
+  assert.equal((await f.operations()).homes.some(h=>h.code==="New"),false);
+});
+
+test("playbook edits produce reviewed versions without changing accepted instances or silently restoring retired policy", async t => {
+  const f=await fixture();t.after(()=>f.db.close());
+  const original=await f.journey();
+  const requirements=structuredClone(original.template.requirements);
+  requirements[0].title="A warmer welcome";
+  requirements[0].overridePolicy={allowed:false,approverRoles:[],evidenceRequired:false};
+  await f.execute({type:"save_playbook",id:original.template.id,expectedRevision:original.template.revision,kind:original.template.kind,name:"New welcoming experience",description:original.template.description,sourceReference:"policy://synthetic/v2",requirements});
+  let data=await f.load();
+  const draft=data.templates.find(t=>t.kind===original.template.kind&&t.status==="draft")!;
+  assert.equal(draft.version,2);assert.equal(draft.approvedBy,null);
+  assert.equal((await f.operations()).templates.find(t=>t.kind===draft.kind)!.version,1);
+  await assert.rejects(f.operation({type:"approve_template",kind:draft.kind,sourceReference:"catalog reset"}),code("configured_playbook"));
+  await f.execute({type:"approve_playbook",id:draft.id,expectedRevision:draft.revision});
+  data=await f.load();
+  assert.equal(data.templates.find(t=>t.id===original.template.id)!.status,"retired");
+  assert.equal((await f.operations()).templates.find(t=>t.kind===draft.kind)!.version,2);
+  assert.deepEqual((await f.operations()).journeys[0],original.journey);
+  const approved=data.templates.find(t=>t.id===draft.id)!;
+  await f.execute({type:"retire_playbook",id:approved.id,expectedRevision:approved.revision});
+  assert.equal((await f.operations()).templates.find(t=>t.kind===draft.kind)!.status,"retired");
+  await assert.rejects(f.operation({type:"create_journey",resourceId:f.resourceId,templateId:original.template.id,missionId:original.mission.id,assignmentReference:"another",ownerId:f.admin.id,fulfillerId:f.worker.id,verifierId:f.reviewer.id,openingAt:null,releaseAt:null,closeoutAt:null}),code("unapproved_template"));
+});
+
+test("verified membership links preserve exact subject and allow revocation after a teammate is archived", async t => {
+  const f=await fixture();t.after(()=>f.db.close());
+  const subject=" exact-verified-subject ";
+  await f.execute({type:"create_member",subject,identityVerified:true,name:"New HOME leader",role:"home_leader",homeScope:"Data",resourceId:null,grants:[]});
+  const created=(await f.load()).members.find(m=>m.name==="New HOME leader")!;
+  const identity=(await f.db.query<{issuer:string;subject:string}>("SELECT issuer,subject FROM be_memberships WHERE id=$1",[created.id])).rows[0];
+  assert.deepEqual(identity,{issuer,subject});
+  const modify=(m:AdminMember,patch:Partial<AdminMember>={}):AdminCommand=>({type:"update_member",id:m.id,expectedRevision:m.revision,name:m.name,role:m.role,resourceId:m.resourceId,homeScope:m.homeScope,grants:m.grants,active:m.active,...patch});
+  const own=(await f.load()).members.find(m=>m.id===f.admin.id)!;
+  await assert.rejects(f.execute(modify(own,{active:false})),code("forbidden"));
+  await assert.rejects(f.execute(modify(created,{homeScope:"NotConfigured"})),code("invalid_home"));
+  await f.execute({type:"set_resource_active",id:f.resourceId,expectedRevision:1,active:false});
+  const worker=(await f.load()).members.find(m=>m.id===f.worker.id)!;
+  const key=randomUUID(), revoke=modify(worker,{active:false});
+  await f.execute(revoke,key);await f.execute(revoke,key);
+  assert.equal((await f.load()).members.find(m=>m.id===f.worker.id)!.active,false);
+  await assert.rejects(f.execute(revoke),code("conflict"));
+  await assert.rejects(f.execute(modify({...worker,revision:2},{active:true})),code("invalid_resource"));
+});
+
+test("admin request validation rejects invented authority and malformed changes while preserving safe editor defaults", () => {
+  const valid={idempotencyKey:randomUUID(),command:{type:"save_home",code:"Data",name:"Data",description:""}};
+  for(const command of [{...valid.command,expectedRevision:1},{...valid.command,id:randomUUID()},{...valid.command,organizationId:randomUUID()},{...valid.command,name:"bad\u0000name"},{...valid.command,id:randomUUID(),expectedRevision:2_147_483_648}]) assert.equal(adminRequestSchema.safeParse({...valid,command}).success,false);
+  const member={type:"create_member",subject:"exact",identityVerified:true,name:"New identity",role:"administrator",resourceId:null,homeScope:null,grants:[]};
+  for(const patch of [{issuer:"https://attacker.example"},{identityVerified:false},{subject:"invalid\nsubject"}]) assert.equal(adminRequestSchema.safeParse({...valid,command:{...member,...patch}}).success,false);
+  const catalog=getJourneyTemplate("mission_onboarding");
+  const command={type:"save_playbook",kind:catalog.kind,name:catalog.name,description:catalog.description,sourceReference:catalog.sourceReference,requirements:catalog.requirements};
+  command.requirements[0].overridePolicy={allowed:false,approverRoles:[],evidenceRequired:false};
+  assert.equal(adminRequestSchema.safeParse({...valid,command}).success,true);
+  command.requirements[0].overridePolicy.allowed=true;
+  assert.equal(adminRequestSchema.safeParse({...valid,command}).success,false);
+});
+
+test("playbook approval rejects inactive prerequisites before a policy can become binding", async t => {
+  const f=await fixture();t.after(()=>f.db.close());
+  const catalog=getJourneyTemplate("mission_onboarding");
+  catalog.requirements[0].active=false;
+  catalog.requirements[1].prerequisiteTemplateIds=[catalog.requirements[0].id];
+  await assert.rejects(f.execute({type:"save_playbook",kind:catalog.kind,name:catalog.name,description:catalog.description,sourceReference:catalog.sourceReference,requirements:catalog.requirements}),code("invalid"));
+  assert.equal((await f.load()).templates.some(t=>t.persisted),false);
+});
+
+test("admin bootstrap announces capped configuration lists", async t => {
+  const f=await fixture();t.after(()=>f.db.close());
+  await f.db.query("INSERT INTO be_clients(organization_id,id,code,name) SELECT $1,gen_random_uuid(),'synthetic-'||n,'Synthetic '||n FROM generate_series(1,1001) n",[f.org]);
+  const data=await f.load();assert.equal(data.clients.length,1000);assert.equal(data.hasMore,true);
+});

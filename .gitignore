@@ -10,3 +10,7 @@ playwright-report/
 .tmp/
 artifacts/
 *.log
+
+.vercel
+.env*
+!.env.example
