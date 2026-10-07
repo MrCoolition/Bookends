@@ -1,21 +1,41 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+
+async function datesStep(page: Page) {
+  await page.getByRole("button", { name: "Dates & hours", exact: true }).click();
+}
+
+async function openPlanner(page: Page) {
+  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await datesStep(page);
+}
+
+async function reviewAndSave(page: Page, editing = false) {
+  await page.getByRole("button", { name: "Review this move", exact: true }).click();
+  await page.getByRole("button", { name: editing ? "Save changes" : "Save to scenario", exact: true }).click();
+}
+
+async function choosePerson(page: Page, id: string) {
+  await page.getByRole("button", { name: "Choose a landing", exact: true }).click();
+  await page.getByLabel("Who’s making the move?").selectOption(id);
+  await datesStep(page);
+}
 
 test("draft placement validates, persists, and requests review without committing", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto("/");
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await page.getByLabel("Hours per week").fill("0");
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await page.getByRole("button", { name: "Review this move", exact: true }).click();
   await expect(page.getByLabel("Hours per week")).toBeFocused();
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Enter positive hours");
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Choose positive weekly hours");
   await page.getByLabel("Hours per week").fill("40");
   await page.getByLabel("Last working date").fill("");
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await page.getByRole("button", { name: "Review this move", exact: true }).click();
   await expect(page.getByLabel("Last working date")).toBeFocused();
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Choose a complete end date");
   await page.getByLabel("Last working date").fill("2027-01-29");
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await reviewAndSave(page);
   await expect(page.getByRole("button", { name: "Edit Alex Morgan's proposed move" })).toBeVisible();
   await expect(page.locator(".scenario-move")).toHaveCount(1);
   await expect(page).toHaveURL(/\?view=runway$/);
@@ -73,11 +93,13 @@ test("open-demand metric and mission planner preserve their selected scope", asy
   await expect(page.locator(".mission-card")).toHaveCount(4);
   await page.locator(".mission-card").filter({ hasText: "Helix" }).click();
   await page.getByRole("button", { name: "Preview a placement" }).click();
+  await page.getByRole("button", { name: "Choose a landing", exact: true }).click();
   await expect(page.getByLabel("Where could they land?")).toHaveValue("m5");
   await page.getByRole("button", { name: "Back to previous view" }).click();
   await expect(page.getByRole("heading", { name: "Intelligent operations", exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\?view=missions$/);
   await page.getByRole("button", { name: "Preview a placement" }).click();
+  await page.getByRole("button", { name: "Choose a landing", exact: true }).click();
   await expect(page.getByLabel("Where could they land?")).toHaveValue("m5");
 });
 
@@ -92,18 +114,18 @@ test("phone views have no page overflow at 320px and keep core actions reachable
   await page.getByRole("button", { name: "Got it. Thanks for the update." }).click();
   await expect(page.getByRole("button", { name: "You’re up to date" })).toBeDisabled();
   await page.goto("/?view=runway");
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   const dialogWidth = await page.getByRole("dialog").evaluate(e => ({ content: e.scrollWidth, width: e.clientWidth }));
   expect(dialogWidth.content).toBeLessThanOrEqual(dialogWidth.width);
-  await expect(page.getByRole("button", { name: "Save to scenario" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Review this move", exact: true })).toBeEnabled();
 });
 
 test("the screenshot's inverted dates recover with one suggested-plan action", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await page.getByLabel("First working date").fill("2027-01-01");
   await page.getByLabel("Last working date").fill("2026-09-01");
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await page.getByRole("button", { name: "Review this move", exact: true }).click();
   await expect(page.getByLabel("Last working date")).toBeFocused();
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText("End on or after Jan 1, 2027");
   await page.getByRole("button", { name: "Use suggested plan", exact: true }).click();
@@ -111,7 +133,7 @@ test("the screenshot's inverted dates recover with one suggested-plan action", a
   await expect(page.getByLabel("Last working date")).toHaveValue("2027-01-29");
   await expect(page.getByLabel("Hours per week")).toHaveValue("40");
   await expect(page.locator(".plan-feedback")).toHaveCount(0);
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await reviewAndSave(page);
   await expect(page.locator(".scenario-move")).toHaveCount(1);
 });
 
@@ -119,41 +141,41 @@ test("extended years and an empty hours field stay editable and never crash the 
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto("/");
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await page.getByLabel("Last working date").fill("10000-01-01");
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await page.getByRole("button", { name: "Review this move", exact: true }).click();
   await expect(page.getByLabel("Last working date")).toBeFocused();
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Choose a complete end date");
   await page.getByRole("button", { name: "Use suggested plan", exact: true }).click();
   await page.getByLabel("First working date").fill("10000-01-01");
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await page.getByRole("button", { name: "Review this move", exact: true }).click();
   await expect(page.getByLabel("First working date")).toBeFocused();
   await page.getByRole("button", { name: "Use suggested plan", exact: true }).click();
   await page.getByLabel("Hours per week").fill("");
   await expect(page.getByLabel("Hours per week")).toHaveValue("");
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await page.getByRole("button", { name: "Review this move", exact: true }).click();
   await expect(page.getByLabel("Hours per week")).toBeFocused();
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Enter positive hours");
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Choose positive weekly hours");
   await page.getByLabel("Hours per week").fill("32.25");
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await reviewAndSave(page);
   await expect(page.locator(".scenario-move")).toContainText("32.25h/week");
   expect(errors).toEqual([]);
 });
 
 test("an unfinished plan survives closing, re-opening, and a browser reload", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await page.getByLabel("First working date").fill("2026-11-09");
   await page.getByLabel("Last working date").fill("2027-01-15");
   await page.getByLabel("Hours per week").fill("24");
   await page.getByRole("button", { name: "Close dialog" }).click();
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await expect(page.getByLabel("First working date")).toHaveValue("2026-11-09");
   await expect(page.getByLabel("Last working date")).toHaveValue("2027-01-15");
   await expect(page.getByLabel("Hours per week")).toHaveValue("24");
   await expect(page.getByText("Picked up right where you left off.", { exact: false })).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await expect(page.getByLabel("First working date")).toHaveValue("2026-11-09");
   await expect(page.getByLabel("Last working date")).toHaveValue("2027-01-15");
   await expect(page.getByLabel("Hours per week")).toHaveValue("24");
@@ -161,13 +183,13 @@ test("an unfinished plan survives closing, re-opening, and a browser reload", as
 
 test("editing a saved move excludes its own capacity and replaces it without duplication", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await openPlanner(page);
+  await reviewAndSave(page);
   await page.getByRole("button", { name: "Edit Alex Morgan's proposed move" }).click();
   await expect(page.locator(".plan-feedback")).toHaveCount(0);
   await expect(page.locator(".plan-availability")).toContainText("40h available each week");
   await page.getByLabel("Hours per week").fill("24");
-  await page.getByRole("button", { name: "Save changes" }).click();
+  await reviewAndSave(page, true);
   await expect(page.locator(".scenario-move")).toHaveCount(1);
   await expect(page.locator(".scenario-move")).toContainText("24h/week");
   await page.reload();
@@ -181,27 +203,29 @@ test("person context returns correctly and changing people suggests a conflict-f
   await page.getByRole("button", { name: "Explore next landings" }).click();
   await expect(page).toHaveURL(/\?view=runway$/);
   await expect(page.getByLabel("Who’s making the move?")).toHaveValue("p1");
+  await datesStep(page);
   await page.getByLabel("Hours per week").fill("20");
   await page.getByRole("button", { name: "Back to previous view" }).click();
   await expect(page).toHaveURL(/person=p1$/);
   await page.getByRole("button", { name: "Explore next landings" }).click();
+  await datesStep(page);
   await expect(page.getByLabel("Hours per week")).toHaveValue("20");
-  await page.getByLabel("Who’s making the move?").selectOption("p3");
+  await choosePerson(page, "p3");
   await expect(page.getByLabel("First working date")).toHaveValue("2026-11-16");
   await expect(page.getByLabel("Hours per week")).toHaveValue("32");
   await expect(page.locator(".plan-feedback")).toHaveCount(0);
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await reviewAndSave(page);
   await expect(page.getByRole("button", { name: "Edit James Okafor's proposed move" })).toBeVisible();
   await expect(page).toHaveURL(/\?view=runway$/);
 });
 
-test("save stays physically visible while the form scrolls in short desktop and phone viewports", async ({ page }) => {
+test("the next action stays physically visible while the form scrolls in short desktop and phone viewports", async ({ page }) => {
   for (const viewport of [{ width: 1280, height: 600 }, { width: 320, height: 568 }]) {
     await page.setViewportSize(viewport);
     await page.goto("/");
-    await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+    await openPlanner(page);
     await page.getByRole("dialog").evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
-    const save = page.getByRole("button", { name: "Save to scenario" });
+    const save = page.getByRole("button", { name: "Review this move", exact: true });
     const before = await save.boundingBox();
     expect(before).not.toBeNull();
     expect(before!.y).toBeGreaterThanOrEqual(0);
@@ -219,33 +243,33 @@ test("save stays physically visible while the form scrolls in short desktop and 
 
 test("reset clears unfinished planner work across reopening and reload", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await page.getByLabel("Hours per week").fill("17");
   await page.getByLabel("Last working date").fill("");
   await page.getByRole("button", { name: "Close dialog" }).click();
   await page.getByRole("button", { name: "Appearance and demo settings" }).click();
   await page.getByRole("button", { name: "Reset demo workspace" }).click();
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await expect(page.getByLabel("Hours per week")).toHaveValue("40");
   await expect(page.getByLabel("Last working date")).toHaveValue("2027-01-29");
   await expect(page.locator(".plan-feedback")).toHaveCount(0);
   await page.reload();
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await expect(page.getByLabel("Hours per week")).toHaveValue("40");
   await expect(page.getByLabel("Last working date")).toHaveValue("2027-01-29");
 });
 
 test("a full pairing offers a direct route to an available mission", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
-  await page.getByLabel("Who’s making the move?").selectOption("p2");
-  await expect(page.locator(".plan-feedback")).toContainText("Only 0 h/week fits these dates");
-  const alternate = page.locator(".plan-feedback").getByRole("button", { name: /^Try / });
+  await openPlanner(page);
+  await choosePerson(page, "p2");
+  await expect(page.locator(".plan-feedback")).toContainText("Maya Patel has 0 h/week available across these dates");
+  const alternate = page.locator(".plan-feedback").getByRole("button", { name: /^Try / }).first();
   await expect(alternate).toBeVisible();
   await alternate.click();
-  await expect(page.getByLabel("Where could they land?")).not.toHaveValue("m2");
+  await expect(page.locator(".plan-route")).not.toContainText("Analytics engine");
   await expect(page.locator(".plan-feedback")).toHaveCount(0);
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await reviewAndSave(page);
   await expect(page.getByRole("button", { name: "Edit Maya Patel's proposed move" })).toBeVisible();
 });
 
@@ -260,13 +284,13 @@ test("unfinished changes survive closing when browser storage is unavailable", a
     };
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await page.getByLabel("Hours per week").fill("16");
   await expect(page.locator(".plan-notice")).toContainText("Changes are kept for this visit; browser storage is unavailable.");
   await page.getByRole("button", { name: "Close dialog" }).click();
-  await page.getByRole("button", { name: "Plan the next move", exact: true }).click();
+  await openPlanner(page);
   await expect(page.getByLabel("Hours per week")).toHaveValue("16");
-  await page.getByRole("button", { name: "Save to scenario" }).click();
+  await reviewAndSave(page);
   await expect(page.locator(".scenario-move")).toContainText("16h/week");
   expect(errors).toEqual([]);
 });

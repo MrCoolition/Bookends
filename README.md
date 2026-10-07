@@ -34,7 +34,7 @@ With a development or production server running on port 3000, `npm run test:e2e`
 - **Missions:** client mission cards, commercial state, funded demand, existing assignments, and open-demand filters.
 - **Decisions:** owned landing gaps, start prerequisites, unanswered updates, reported questions, and demo scenario review requests.
 - **My Bookends:** a person's itinerary, confirmed versus unknown next landing, evidence submission, and explicit acknowledgment of a specific update.
-- **Scenario studio:** suggested dates and available hours, one-click conflict recovery, a fixed save bar, resumable unfinished forms, and editable saved moves. A separate demo review request leaves accepted staffing unchanged and sends no real notification.
+- **Scenario studio:** a guided landing → dates and hours → review flow. Mission cards show feasible windows, a weekly capacity map separates a person's availability from a mission's funded room, and direct recovery choices explain existing reservations. Quick date windows, earlier part-time alternatives, hour presets, a final review card, and resumable drafts keep the next action clear. A separate demo review request leaves accepted staffing unchanged and sends no real notification.
 - **Presentation:** six scenes using the same baseline calculations, with scoped HOME selection, horizon, synthetic-name display controls, and keyboard navigation. This is a local presentation preview, not secure sharing or a frozen server-side snapshot.
 - **Appearance:** light, dark, and projector options. Light is the default. Reduced-motion preferences are respected.
 
