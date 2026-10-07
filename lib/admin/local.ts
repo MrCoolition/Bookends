@@ -4,6 +4,7 @@ import { JOURNEY_TEMPLATE_CATALOG } from "../journeys/templates";
 import type { JourneyActor, JourneyRole, JourneyTemplate, PermissionScope } from "../journeys/types";
 import type { AdminBootstrap, AdminCommand, AdminGrant, AdminMember, AdminPlaybook } from "./contracts";
 import { adminRequestSchema } from "./validation";
+import { capabilityAliasesAfterRename, capabilityNameKey, capabilitySchema, engagementPlanSchema, profileSchema } from "./engagement";
 
 /** Browser-local configuration only. These records never establish an authenticated identity or permission. */
 export type LocalAdminStore = { version: 1; revision: number; data: AdminBootstrap };
@@ -43,8 +44,9 @@ const storeSchema = z.object({
     viewer: z.object({ id: z.literal(LOCAL_ADMIN_OWNER_ID), name: text(160) }).strict(),
     clients: z.array(z.object({ ...recordFields, name: text(160), code: text(80), contactName: optionalText(160), contactEmail: z.union([z.literal(""), z.email().max(254)]), notes: optionalText(4000) }).strict()).max(MAX_RECORDS),
     homes: z.array(z.object({ ...recordFields, code: text(80), name: text(160), description: optionalText(2000) }).strict()).max(MAX_RECORDS),
-    resources: z.array(z.object({ ...recordFields, name: text(160), home: text(80), ownerId: id }).strict()).max(MAX_RECORDS),
-    missions: z.array(z.object({ ...recordFields, name: text(160), clientId: id }).strict()).max(MAX_RECORDS),
+    resources: z.array(z.object({ ...recordFields, name: text(160), home: text(80), ownerId: id, profile: profileSchema.optional() }).strict()).max(MAX_RECORDS),
+    missions: z.array(z.object({ ...recordFields, name: text(160), clientId: id, engagement: engagementPlanSchema.optional() }).strict()).max(MAX_RECORDS),
+    capabilities: z.array(capabilitySchema).max(MAX_RECORDS).default([]),
     members: z.array(z.object({ ...recordFields, ...memberFields }).strict()).min(1).max(MAX_RECORDS),
     templates: z.array(templateSchema).min(4).max(200), asOf: z.iso.datetime(), hasMore: z.literal(false).optional(),
   }).strict(),
@@ -93,7 +95,8 @@ function jsonValue(input: unknown): unknown {
   return parsed;
 }
 function validateLinks(data: AdminBootstrap) {
-  for (const [label, records] of Object.entries({ clients: data.clients, HOMEs: data.homes, people: data.resources, missions: data.missions, members: data.members, playbooks: data.templates })) unique(records.map(record => record.id), `${label} IDs`);
+  for (const [label, records] of Object.entries({ clients: data.clients, HOMEs: data.homes, people: data.resources, missions: data.missions, capabilities: data.capabilities ?? [], members: data.members, playbooks: data.templates })) unique(records.map(record => record.id), `${label} IDs`);
+  unique((data.capabilities ?? []).flatMap(capability => [capability.name, ...(capability.aliases ?? [])].map(name => `${capability.kind}:${capabilityNameKey(name)}`)), "Role and skill names, including former names");
   unique(data.clients.map(client => client.code), "Client codes"); unique(data.homes.map(home => home.code), "HOME codes");
   unique(data.templates.filter(template => template.persisted).map(template => `${template.kind}:${template.version}`), "Playbook versions");
   unique(data.members.filter(member => member.active && member.resourceId).map(member => member.resourceId!), "Active teammate links");
@@ -159,7 +162,7 @@ export function parseLocalAdminStore(input: unknown): LocalAdminStore {
 
 export function createLocalAdminStore(): LocalAdminStore {
   const owner: AdminMember = { id: LOCAL_ADMIN_OWNER_ID, name: "Workspace owner", role: "administrator", resourceId: null, homeScope: null, active: true, revision: 1, grants: [] };
-  return { version: 1, revision: 1, data: { organization: { id: LOCAL_ADMIN_ORGANIZATION_ID, name: "BOOKENDS workspace", revision: 1 }, viewer: { id: owner.id, name: owner.name }, clients: [], homes: [], resources: [], missions: [], members: [owner], templates: JOURNEY_TEMPLATE_CATALOG.map(template => ({ ...structuredClone(template), revision: 0, persisted: false })), asOf: new Date().toISOString(), hasMore: false } };
+  return { version: 1, revision: 1, data: { organization: { id: LOCAL_ADMIN_ORGANIZATION_ID, name: "BOOKENDS workspace", revision: 1 }, viewer: { id: owner.id, name: owner.name }, clients: [], homes: [], resources: [], missions: [], capabilities: [], members: [owner], templates: JOURNEY_TEMPLATE_CATALOG.map(template => ({ ...structuredClone(template), revision: 0, persisted: false })), asOf: new Date().toISOString(), hasMore: false } };
 }
 function current<T extends { id: string; revision: number }>(records: T[], recordId: string, expected: number | undefined): T {
   const record = records.find(record => record.id === recordId);
@@ -197,17 +200,29 @@ export function applyLocalAdminCommand(input: LocalAdminStore, raw: LocalAdminCo
       activeHome(data, command.home);
       ensure(data.members.some(member => member.id === command.ownerId && member.active), "invalid_owner", "Choose an active local owner.");
       const record = command.id ? current(data.resources, command.id, command.expectedRevision) : null;
-      const value = { id: record?.id ?? crypto.randomUUID(), name: command.name, home: command.home, ownerId: command.ownerId, active: record?.active ?? true, revision: (record?.revision ?? 0) + 1 };
+      const profile = command.profile ?? record?.profile;
+      const value = { id: record?.id ?? crypto.randomUUID(), name: command.name, home: command.home, ownerId: command.ownerId, active: record?.active ?? true, revision: (record?.revision ?? 0) + 1, ...(profile ? { profile } : {}) };
       if (record) Object.assign(record, value); else data.resources.push(value); break;
     }
     case "save_mission": {
       activeClient(data, command.clientId);
       const record = command.id ? current(data.missions, command.id, command.expectedRevision) : null;
-      const value = { id: record?.id ?? crypto.randomUUID(), name: command.name, clientId: command.clientId, active: record?.active ?? true, revision: (record?.revision ?? 0) + 1 };
+      const engagement = command.engagement ?? record?.engagement;
+      const value = { id: record?.id ?? crypto.randomUUID(), name: command.name, clientId: command.clientId, active: record?.active ?? true, revision: (record?.revision ?? 0) + 1, ...(engagement ? { engagement } : {}) };
       if (record) Object.assign(record, value); else data.missions.push(value); break;
     }
-    case "set_client_active": case "set_home_active": case "set_resource_active": case "set_mission_active": {
-      const records = command.type === "set_client_active" ? data.clients : command.type === "set_home_active" ? data.homes : command.type === "set_resource_active" ? data.resources : data.missions;
+    case "save_capability": {
+      const capabilities = data.capabilities ??= [];
+      const record = command.id ? current(capabilities, command.id, command.expectedRevision) : null;
+      ensure(!record || record.kind === command.kind, "immutable_kind", "Create a separate catalog entry for a different capability kind.");
+      ensure(!capabilities.some(other => other.id !== record?.id && other.kind === command.kind && [other.name, ...(other.aliases ?? [])].some(name => capabilityNameKey(name) === capabilityNameKey(command.name))), "duplicate", "That role or skill name is already used, including its former names.");
+      const aliases = capabilityAliasesAfterRename(record, command.name);
+      ensure(aliases.length <= 50, "rename_limit", "This entry has 50 former names. Keep its current name or create a distinct new catalog entry.");
+      const value = { id: record?.id ?? crypto.randomUUID(), kind: command.kind, name: command.name, description: command.description, aliases, active: record?.active ?? true, revision: (record?.revision ?? 0) + 1 };
+      if (record) Object.assign(record, value); else capabilities.push(value); break;
+    }
+    case "set_client_active": case "set_home_active": case "set_resource_active": case "set_mission_active": case "set_capability_active": {
+      const records = command.type === "set_client_active" ? data.clients : command.type === "set_home_active" ? data.homes : command.type === "set_resource_active" ? data.resources : command.type === "set_capability_active" ? data.capabilities ?? [] : data.missions;
       const record = current<{id:string;revision:number;active:boolean}>(records, command.id, command.expectedRevision);
       record.active = command.active; record.revision++; break;
     }

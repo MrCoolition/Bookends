@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Journey, JourneyActor, JourneyKind, JourneyRole, JourneyTemplate, BaggageObligation, ObligationStatus } from "../lib/journeys/types";
+import type { EngagementPlan, ResourceProfile } from "../lib/admin/engagement";
 
 const audit = () => ({ createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(), updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow() });
 const revision = () => integer("revision").notNull().default(1);
@@ -13,6 +14,9 @@ export const clients = pgTable("be_clients", {
 export const homes = pgTable("be_homes", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id), id: uuid("id").notNull(), code: text("code").notNull(), name: text("name").notNull(), description: text("description").notNull().default(""), active: boolean("active").notNull().default(true), revision: revision(), ...audit(),
 }, table => [primaryKey({ columns: [table.organizationId, table.id] }), unique().on(table.organizationId, table.code)]);
+export const capabilities = pgTable("be_capabilities", {
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id), id: uuid("id").notNull(), kind: text("kind").$type<"role" | "skill">().notNull(), name: text("name").notNull(), description: text("description").notNull().default(""), aliases: jsonb("aliases").$type<string[]>().notNull().default([]), active: boolean("active").notNull().default(true), revision: revision(), ...audit(),
+}, table => [primaryKey({ columns: [table.organizationId, table.id] }), uniqueIndex("be_capabilities_name_unique").on(table.organizationId, table.kind, sql`lower(trim(${table.name}))`), check("be_capabilities_kind_check", sql`${table.kind} in ('role','skill')`)]);
 export const memberships = pgTable("be_memberships", {
   id: uuid("id").primaryKey(), organizationId: uuid("organization_id").notNull().references(() => organizations.id),
   issuer: text("issuer").notNull(), subject: text("subject").notNull(), name: text("name").notNull(), role: text("role").$type<JourneyRole>().notNull(),
@@ -27,10 +31,10 @@ export const memberships = pgTable("be_memberships", {
 function resourceOrganizationColumn(): AnyPgColumn { return resources.organizationId; }
 function resourceIdColumn(): AnyPgColumn { return resources.id; }
 export const resources = pgTable("be_resources", {
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id), id: uuid("id").notNull(), name: text("name").notNull(), home: text("home").notNull(), ownerId: uuid("owner_id").notNull(), active: boolean("active").notNull().default(true), revision: revision(), ...audit(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id), id: uuid("id").notNull(), name: text("name").notNull(), home: text("home").notNull(), ownerId: uuid("owner_id").notNull(), profile: jsonb("profile").$type<ResourceProfile>(), active: boolean("active").notNull().default(true), revision: revision(), ...audit(),
 }, table => [primaryKey({ columns: [table.organizationId, table.id] }), foreignKey({ columns: [table.organizationId, table.ownerId], foreignColumns: [memberships.organizationId, memberships.id] }), foreignKey({ name: "be_resources_home_fk", columns: [table.organizationId, table.home], foreignColumns: [homes.organizationId, homes.code] }), index("be_resources_owner_idx").on(table.organizationId, table.ownerId)]);
 export const missions = pgTable("be_missions", {
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id), id: uuid("id").notNull(), name: text("name").notNull(), clientName: text("client_name").notNull(), clientId: uuid("client_id"), active: boolean("active").notNull().default(true), revision: revision(), ...audit(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id), id: uuid("id").notNull(), name: text("name").notNull(), clientName: text("client_name").notNull(), clientId: uuid("client_id"), engagement: jsonb("engagement").$type<EngagementPlan>(), active: boolean("active").notNull().default(true), revision: revision(), ...audit(),
 }, table => [primaryKey({ columns: [table.organizationId, table.id] }), foreignKey({ name: "be_missions_client_fk", columns: [table.organizationId, table.clientId], foreignColumns: [clients.organizationId, clients.id] }), index("be_missions_client_idx").on(table.organizationId, table.clientId)]);
 export const assignmentReferences = pgTable("be_assignment_references", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id), id: uuid("id").notNull(), resourceId: uuid("resource_id").notNull(), missionId: uuid("mission_id").notNull(), sourceReference: text("source_reference").notNull(), ...audit(),

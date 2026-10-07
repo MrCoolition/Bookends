@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { applyLocalAdminCommand, createLocalAdminStore, LOCAL_ADMIN_OWNER_ID } from "../lib/admin/local";
+import { findRoleMatches } from "../lib/admin/engagement";
 import { applySpreadsheetImport, planSpreadsheetImport, readSpreadsheetFile, SPREADSHEET_HEADERS, type SpreadsheetWorkbook, type SpreadsheetSheetName, type SpreadsheetCell } from "../lib/admin/spreadsheet";
 
 function sheet(name: SpreadsheetSheetName, records: SpreadsheetCell[][], headers: string[] = [...SPREADSHEET_HEADERS[name]]) { return { name, rows: [[name],["Instructions"],[],headers,...records] }; }
@@ -96,9 +97,159 @@ const templateUrl=new URL("../public/templates/BOOKENDS_Seed_Template.xlsx",impo
 async function templateFile() { return new File([new Uint8Array(await readFile(templateUrl))],"BOOKENDS_Seed_Template.xlsx"); }
 test("actual blank Excel template parses quickly without importing its 1000 formatted empty rows", async () => {
   const workbook=await readSpreadsheetFile(await templateFile());
-  assert.deepEqual(workbook.sheets.map(sheet=>sheet.name),["HOMEs","Clients","People","Missions"]);
+  assert.deepEqual(workbook.sheets.map(sheet=>sheet.name),["HOMEs","Clients","People","Missions","Engagements","Engagement roles","Roles","Skills"]);
   const plan=planSpreadsheetImport(createLocalAdminStore(),workbook);
   assert.deepEqual(plan.errors,[]);assert.deepEqual(plan.counts,{adds:0,updates:0,skips:0});
+});
+
+function engagementWorkbook(): SpreadsheetWorkbook {
+  return { sheets: [sheet("Engagement roles", [
+    ["Application build", "ACORN", "Data engineer", 2, 100, "SQL; Python", "Build and operate data pipelines", "", ""],
+    ["Application build", "ACORN", "Full stack developer", 3, 100, "React; TypeScript", "Build and test the application", "", ""],
+    ["Application build", "ACORN", "BA / PM", 1, "50%", "Agile; Requirements; Testing", "Run boards and agile ceremonies; maintain requirements; light testing", "2027-02-01", "2027-06-30"],
+  ]), sheet("Engagements", [["Application build", "ACORN", "SOW-2027-001", "signed", "2026-12-18", "2027-01-01", "2027-06-30", "Launch a customer application"]]), sheet("Clients", [["ACORN", "Acorn Studio", "", "", ""]])] };
+}
+test("SOW import links a months-long engagement and role demand regardless of sheet order", () => {
+  const store = createLocalAdminStore(), before = structuredClone(store), plan = planSpreadsheetImport(store, engagementWorkbook());
+  assert.deepEqual(plan.errors, []); assert.deepEqual(plan.counts, { adds: 5, updates: 0, skips: 0 });
+  const next = applySpreadsheetImport(store, plan), engagement = next.data.missions[0].engagement!;
+  assert.deepEqual(store, before); assert.equal(engagement.roles.length, 3);
+  assert.equal(engagement.roles[0].start, "2027-01-01"); assert.equal(engagement.roles[0].end, "2027-06-30");
+  assert.equal(engagement.roles[2].headcount, 1); assert.equal(engagement.roles[2].allocationPercent, 50);
+  assert.deepEqual(engagement.roles[0].skills, ["SQL", "Python"]);
+  const repeated = planSpreadsheetImport(next, engagementWorkbook());
+  assert.deepEqual(repeated.errors, []); assert.deepEqual(repeated.counts, { adds: 0, updates: 0, skips: 5 });
+  assert.deepEqual(applySpreadsheetImport(next, repeated), next);
+});
+
+test("role updates preserve stable IDs, unmentioned roles, omitted columns and legacy Missions compatibility", () => {
+  const empty = createLocalAdminStore(), store = applySpreadsheetImport(empty, planSpreadsheetImport(empty, engagementWorkbook()));
+  const current = store.data.missions[0], originalRoles = structuredClone(current.engagement!.roles);
+  const workbook: SpreadsheetWorkbook = { sheets: [sheet("Engagement roles", [["Application build", "ACORN", "Data engineer", 3, 75]], ["Engagement name", "Client code", "Role name", "Headcount", "Allocation %"])] };
+  const plan = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(plan.errors, []); assert.deepEqual(plan.counts, { adds: 0, updates: 1, skips: 0 });
+  const next = applySpreadsheetImport(store, plan), role = next.data.missions[0].engagement!.roles[0];
+  assert.equal(next.data.missions[0].id, current.id); assert.equal(role.id, originalRoles[0].id);
+  assert.equal(role.headcount, 3); assert.equal(role.allocationPercent, 75); assert.deepEqual(role.skills, originalRoles[0].skills);
+  assert.deepEqual(next.data.missions[0].engagement!.roles.slice(1), originalRoles.slice(1));
+  const legacy = planSpreadsheetImport(next, { sheets: [sheet("Missions", [["Application build", "ACORN"]])] });
+  assert.deepEqual(applySpreadsheetImport(next, legacy), next);
+});
+
+test("invalid SOW dates, role dates, duplicate keys and unknown parents reject the entire workbook", () => {
+  const store = createLocalAdminStore(), before = structuredClone(store);
+  const cases = [
+    (book: SpreadsheetWorkbook) => { book.sheets[1].rows[4][5] = "2027-02-30"; },
+    (book: SpreadsheetWorkbook) => { book.sheets[0].rows[4][7] = "2026-12-01"; },
+    (book: SpreadsheetWorkbook) => { book.sheets[0].rows[4][3] = 1.5; },
+    (book: SpreadsheetWorkbook) => { book.sheets[0].rows[4][4] = 120; },
+    (book: SpreadsheetWorkbook) => { book.sheets[0].rows.push([...book.sheets[0].rows[4]]); },
+    (book: SpreadsheetWorkbook) => { book.sheets[1].rows.push([...book.sheets[1].rows[4]]); },
+    (book: SpreadsheetWorkbook) => { book.sheets.push(sheet("Missions", [["Application build", "ACORN"]])); },
+    (book: SpreadsheetWorkbook) => { book.sheets[0].rows[4][0] = "Unknown engagement"; },
+    (book: SpreadsheetWorkbook) => { book.sheets[1].rows[4][4] = ""; },
+    (book: SpreadsheetWorkbook) => { book.sheets[0].rows = book.sheets[0].rows.slice(0, 4); },
+  ];
+  for (const modify of cases) {
+    const book = engagementWorkbook(); modify(book);
+    const plan = planSpreadsheetImport(store, book);
+    assert.ok(plan.errors.length > 0); assert.throws(() => applySpreadsheetImport(store, plan), code("invalid_import")); assert.deepEqual(store, before);
+  }
+});
+
+test("People profile columns preserve omitted values and clear only explicitly blank fields", () => {
+  let store = imported();
+  const withProfile = { sheets: [sheet("People", [["Alex Morgan", "Data", "", "Data engineer; Full stack developer", "SQL, Python"]])] };
+  store = applySpreadsheetImport(store, planSpreadsheetImport(store, withProfile));
+  const person = store.data.resources[0];
+  assert.deepEqual(person.profile, { roles: ["Data engineer", "Full stack developer"], skills: ["SQL", "Python"] });
+  const legacy = { sheets: [sheet("People", [["Alex Morgan", "Data", ""]], ["Person name", "HOME code", "Owner name"])] };
+  assert.deepEqual(applySpreadsheetImport(store, planSpreadsheetImport(store, legacy)).data.resources[0], person);
+  const clearSkills = { sheets: [sheet("People", [["Alex Morgan", "Data", ""]], ["Person name", "HOME code", "Skills"])] };
+  const next = applySpreadsheetImport(store, planSpreadsheetImport(store, clearSkills));
+  assert.deepEqual(next.data.resources[0].profile, { roles: person.profile!.roles, skills: [] });
+  assert.equal(next.data.resources[0].id, person.id);
+});
+
+test("Roles and Skills catalogs seed distinct kinds and match renamed aliases without renaming back", () => {
+  const empty = createLocalAdminStore(), workbook = { sheets: [sheet("Roles", [["Data engineer", "Builds data products"]]), sheet("Skills", [["SQL", "Relational queries"], ["Data engineer", "A separate skill label"]])] };
+  const plan = planSpreadsheetImport(empty, workbook);
+  assert.deepEqual(plan.errors, []); assert.equal(plan.counts.adds, 3);
+  let store = applySpreadsheetImport(empty, plan);
+  const record = store.data.capabilities!.find(item => item.kind === "role")!;
+  store = applyLocalAdminCommand(store, { type: "save_capability", id: record.id, expectedRevision: record.revision, kind: "role", name: "Data engineering specialist", description: record.description });
+  const updating = planSpreadsheetImport(store, { sheets: [sheet("Roles", [["data engineer", "Designs and operates pipelines"]])] });
+  assert.deepEqual(updating.errors, []); assert.equal(updating.counts.updates, 1);
+  const next = applySpreadsheetImport(store, updating), saved = next.data.capabilities!.find(item => item.id === record.id)!;
+  assert.equal(saved.name, "Data engineering specialist"); assert.deepEqual(saved.aliases, ["Data engineer"]); assert.equal(saved.description, "Designs and operates pipelines");
+  const duplicate = planSpreadsheetImport(next, { sheets: [sheet("Roles", [["Data engineer", "First update"], ["Data engineering specialist", "Second update"]])] });
+  assert.ok(duplicate.errors.some(issue => issue.message.includes("already matches"))); assert.throws(() => applySpreadsheetImport(next, duplicate), code("invalid_import"));
+  const old = planSpreadsheetImport(next, { sheets: [sheet("Clients", [["next", "Next client"]])] });
+  assert.deepEqual(applySpreadsheetImport(next, old).data.capabilities, next.data.capabilities);
+});
+
+test("quoted role and skill labels survive imports and keep profile matching intact", () => {
+  const store = createLocalAdminStore(), workbook = engagementWorkbook();
+  workbook.sheets[0].rows[4][2] = "Platform engineer, cloud";
+  workbook.sheets[0].rows[4][5] = 'SQL; "Cloud (AWS, Azure)"';
+  workbook.sheets.push(sheet("HOMEs", [["DATA", "Data practice"]]), sheet("People", [["Alex Morgan", "DATA", "", '"Platform engineer, cloud"', 'SQL; "Cloud (AWS, Azure)"']]), sheet("Roles", [["Platform engineer, cloud", "Builds cloud platforms"]]), sheet("Skills", [["Cloud (AWS, Azure)", "Cloud engineering"]]));
+  const plan = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(plan.errors, []);
+  const next = applySpreadsheetImport(store, plan), person = next.data.resources[0], role = next.data.missions[0].engagement!.roles[0];
+  assert.deepEqual(person.profile, { roles: ["Platform engineer, cloud"], skills: ["SQL", "Cloud (AWS, Azure)"] });
+  assert.deepEqual(role.skills, person.profile!.skills);
+  const matches = findRoleMatches(role, next.data.resources, next.data.capabilities);
+  assert.equal(matches[0].roleMatch, true); assert.deepEqual(matches[0].missingSkills, []);
+  const omitted = { sheets: [sheet("Engagement roles", [["Application build", "ACORN", "Platform engineer, cloud", 3, 100]], ["Engagement name", "Client code", "Role name", "Headcount", "Allocation %"])] };
+  assert.deepEqual(applySpreadsheetImport(next, planSpreadsheetImport(next, omitted)).data.missions[0].engagement!.roles[0].skills, role.skills);
+});
+
+test("malformed list quoting reports its cell and prevents any import", () => {
+  const store = createLocalAdminStore();
+  for (const target of ["People", "Engagement roles"] as const) {
+    const workbook = engagementWorkbook();
+    workbook.sheets.push(sheet("HOMEs", [["DATA", "Data practice"]]), sheet("People", [["Alex Morgan", "DATA", "", "Data engineer", "SQL"]]));
+    const row = workbook.sheets.find(item => item.name === target)!.rows[4];
+    row[target === "People" ? 4 : 5] = 'SQL; "Cloud (AWS, Azure)';
+    const plan = planSpreadsheetImport(store, workbook);
+    assert.ok(plan.errors.some(error => error.sheet === target && error.row === 5 && error.field === "Skills"));
+    assert.throws(() => applySpreadsheetImport(store, plan), code("invalid_import"));
+    assert.equal(store.data.clients.length, 0);
+  }
+});
+
+test("real Excel date and percentage cells become inclusive dates and allocation without losing their units", async () => {
+  const entries = unzipSync(new Uint8Array(await readFile(templateUrl)));
+  const serial = (date: string) => (Date.parse(`${date}T00:00:00Z`) - Date.UTC(1899, 11, 30)) / 86_400_000;
+  const values: Record<string, Record<string, string | number>> = {
+    "xl/worksheets/sheet3.xml": { A5: "ACORN", B5: "Acorn Studio" },
+    "xl/worksheets/sheet6.xml": { A5: "Application build", B5: "ACORN", C5: "SOW-001", D5: "signed", E5: serial("2026-12-18"), F5: serial("2027-01-01"), G5: serial("2027-06-30") },
+    "xl/worksheets/sheet7.xml": { A5: "Application build", B5: "ACORN", C5: "BA / PM", D5: 1, E5: 0.5, F5: "Agile; Testing" },
+  };
+  let styles = strFromU8(entries["xl/styles.xml"]);
+  const prefix = styles.includes("<x:styleSheet") ? "x:" : "";
+  const countPattern = new RegExp(`<${prefix}cellXfs count="(\\d+)"`), count = Number(countPattern.exec(styles)![1]);
+  styles = styles.replace(countPattern, `<${prefix}cellXfs count="${count + 1}"`).replace(`</${prefix}cellXfs>`, `<${prefix}xf numFmtId="9" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></${prefix}cellXfs>`);
+  entries["xl/styles.xml"] = strToU8(styles);
+  for (const [name, cells] of Object.entries(values)) {
+    let xml = strFromU8(entries[name]);
+    const p = xml.includes("<x:worksheet") ? "x:" : "";
+    for (const [address, value] of Object.entries(cells)) {
+      const cell = new RegExp(`<${p}c r="${address}"([^>]*?)/>`);
+      assert.match(xml, cell);
+      xml = xml.replace(cell, (_, attributes: string) => {
+        const style = name.endsWith("sheet7.xml") && address === "E5" ? attributes.replace(/\bs="\d+"/, `s="${count}"`) : attributes;
+        return `<${p}c r="${address}"${style}${typeof value === "string" ? ' t="str"' : ""}><${p}v>${value}</${p}v></${p}c>`;
+      });
+    }
+    entries[name] = strToU8(xml);
+  }
+  const parsed = await readSpreadsheetFile(new File([new Uint8Array(zipSync(entries))], "dated-sow.xlsx"));
+  const empty = createLocalAdminStore(), plan = planSpreadsheetImport(empty, parsed);
+  assert.deepEqual(plan.errors, []);
+  const engagement = applySpreadsheetImport(empty, plan).data.missions[0].engagement!;
+  assert.equal(engagement.start, "2027-01-01"); assert.equal(engagement.end, "2027-06-30"); assert.equal(engagement.signedOn, "2026-12-18");
+  assert.equal(engagement.roles[0].allocationPercent, 50);
 });
 
 test("actual XLSX formula metadata rejects cached values and keeps exact cell diagnostics", async () => {

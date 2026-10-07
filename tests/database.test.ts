@@ -59,7 +59,7 @@ test("every business table forces RLS and runtime owns no tables or bypass privi
   const roles = await database.query<{ rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean; rolcreatedb: boolean; rolcreaterole: boolean }>("SELECT rolsuper,rolbypassrls,rolcanlogin,rolcreatedb,rolcreaterole FROM pg_roles WHERE rolname='be_runtime'");
   assert.deepEqual(roles.rows[0], { rolsuper: false, rolbypassrls: false, rolcanlogin: false, rolcreatedb: false, rolcreaterole: false });
   const tables = await database.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean; owner: string }>("SELECT relrowsecurity,relforcerowsecurity,pg_get_userbyid(relowner) AS owner FROM pg_class WHERE relkind='r' AND relname LIKE 'be_%' AND relname <> 'be_schema_migrations'");
-  assert.equal(tables.rows.length, 14);
+  assert.equal(tables.rows.length, 15);
   assert.ok(tables.rows.every(table => table.relrowsecurity && table.relforcerowsecurity && table.owner !== "be_runtime"));
   await assert.rejects(runtime(orgA, tx => tx.query("SELECT * FROM be_schema_migrations")), code("42501"));
 });
@@ -225,6 +225,7 @@ test("migrations and bounded admin functions work with a genuine non-BYPASSRLS o
     await isolated.query("INSERT INTO be_missions(organization_id,id,name,client_name) VALUES ($1,$2,'Mission','Legacy client')", [orgA, missionA]);
     await isolated.query("SELECT set_config('bookends.organization_id','',false)");
     await isolated.exec(await readFile(resolve(process.cwd(), "db/migrations/0002_administration.sql"), "utf8"));
+    await isolated.exec(await readFile(resolve(process.cwd(), "db/migrations/0003_engagement_planning.sql"), "utf8"));
     assert.equal((await isolated.query("SELECT id FROM be_resources")).rows.length, 0, "FORCE RLS applies even to the migration owner after backfill");
     assert.deepEqual((await isolated.query<{ rolsuper: boolean; rolbypassrls: boolean }>("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user")).rows, [{ rolsuper: false, rolbypassrls: false }]);
     await isolated.transaction(async tx => {

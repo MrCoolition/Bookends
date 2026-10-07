@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowUpRight, Building2, Check, ClipboardList, Flag, Layers3, LockKeyhole, Settings2, ShieldCheck, UsersRound } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Building2, Check, ClipboardList, Flag, Layers3, LockKeyhole, Settings2, ShieldCheck, Tags, UsersRound } from "lucide-react";
 import { getAuthConfigurationStatus } from "@/lib/auth/config";
 import { readIdentity } from "@/lib/auth/identity";
 import { databaseConfigured, withMember } from "@/lib/operations/db";
@@ -16,7 +16,8 @@ const SECTIONS = [
   { name: "Clients", Icon: Building2, description: "Client names, contacts, and the context that makes every relationship easier to manage.", detail: "Names · contacts · notes" },
   { name: "HOMEs", Icon: Layers3, description: "The practices your people belong to, with stable codes and names that can evolve.", detail: "Practices · descriptions" },
   { name: "People", Icon: UsersRound, description: "Teammate records, their HOME, and the named person accountable for their next chapter.", detail: "People · ownership · HOME" },
-  { name: "Missions", Icon: Flag, description: "Keep each mission connected to the right client for clearer arrivals and handoffs.", detail: "Missions · client connections" },
+  { name: "Engagements", Icon: Flag, description: "Connect SOWs to months of delivery, with role headcount, allocation, skills, and phased team needs.", detail: "SOWs · dates · team demand" },
+  { name: "Roles & skills", Icon: Tags, description: "Maintain a shared vocabulary for teammate profiles and the capabilities your engagements need.", detail: "Delivery roles · skills · matching" },
   { name: "Playbooks", Icon: ClipboardList, description: "Edit welcome and farewell steps, review new versions, and approve them for future journeys.", detail: "Steps · versions · approvals" },
   { name: "Access & settings", Icon: Settings2, description: "Your workspace name, verified member identities, and the roles and scopes they need.", detail: "Members · permissions · settings" },
 ];

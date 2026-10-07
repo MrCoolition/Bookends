@@ -78,7 +78,7 @@ test("downloaded Excel template seeds linked records, survives reload, skips rep
   await page.reload();
   await section(page, "People").click();
   await expect(page.getByRole("button", { name: /Alex Example/ })).toBeVisible();
-  await section(page, "Missions").click();
+  await section(page, "Engagements").click();
   await expect(page.getByRole("button", { name: /Solstice Launch/ })).toBeVisible();
   const saved = JSON.parse((await snapshot(page))!);
   expect(saved.data.resources[0].home).toBe("STUDIO");
@@ -131,4 +131,39 @@ test("Excel validation blocks the whole batch and stale reviews cannot overwrite
   await review.getByRole("button", { name: "Apply import", exact: true }).click();
   await expect(review.getByRole("alert")).toContainText("Setup changed after this workbook was reviewed");
   expect(await snapshot(page)).toBe(newer);
+});
+
+test("the downloaded workbook seeds an SOW team, skills catalog and matching teammate profiles together", async ({ page }) => {
+  await page.goto("/admin");
+  const bytes = await downloadTemplate(page);
+  const workbook = filledTemplate(bytes, {
+    HOMEs: ["DATA", "Data Engineering", "Data delivery"],
+    Clients: ["ACORN", "Acorn Example"],
+    Roles: ["Data engineer", "Builds data pipelines"],
+    Skills: ["SQL", "Relational querying"],
+    People: ["Alex Example", "DATA", "", "Data engineer", "SQL; Python"],
+    Engagements: ["Application build", "ACORN", "SOW-2027-001", "signed", "2026-12-18", "2027-01-01", "2027-12-31", "Launch the app"],
+    "Engagement roles": ["Application build", "ACORN", "Data engineer", "2", "75", "SQL; Python", "Build and validate data pipelines", "", ""],
+  });
+  const before = await snapshot(page);
+  const review = await reviewFile(page, workbook);
+  await expect(review.locator(".admin-excel-issues")).toHaveCount(0);
+  expect(await snapshot(page)).toBe(before);
+  await review.getByRole("checkbox").check();
+  await review.getByRole("button", { name: "Apply import", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  await page.reload();
+  const store = JSON.parse((await snapshot(page))!);
+  expect(store.data.capabilities).toHaveLength(2);
+  expect(store.data.resources[0].profile).toEqual({ roles: ["Data engineer"], skills: ["SQL", "Python"] });
+  expect(store.data.missions[0].engagement).toMatchObject({ status: "signed", sowReference: "SOW-2027-001", start: "2027-01-01", end: "2027-12-31" });
+  expect(store.data.missions[0].engagement.roles[0]).toMatchObject({ name: "Data engineer", headcount: 2, allocationPercent: 75, start: "2027-01-01", end: "2027-12-31", skills: ["SQL", "Python"] });
+  await section(page, "Engagements").click();
+  await page.getByRole("button", { name: /Application build/ }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("1.5");
+  await dialog.getByText("Find teammates", { exact: true }).click();
+  const teammate = dialog.getByRole("article").filter({ hasText: "Alex Example" });
+  await expect(teammate).toContainText("Role matches");
+  await expect(teammate).toContainText("2/2 skills");
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { engagementPlanSchema, profileSchema } from "./engagement";
 
 const id = z.uuid();
 const text = (max = 2000) => z.string().trim().min(1).max(max).refine(value => !value.includes("\u0000"), "Text cannot contain null characters.");
@@ -31,10 +32,12 @@ export const adminRequestSchema = z.object({
     z.object({ type: z.literal("set_client_active"), ...toggle }).strict(),
     z.object({ type: z.literal("save_home"), ...identity, code: text(80), name: text(160), description: optionalText(2000) }).strict(),
     z.object({ type: z.literal("set_home_active"), ...toggle }).strict(),
-    z.object({ type: z.literal("save_resource"), ...identity, name: text(160), home: text(80), ownerId: id }).strict(),
+    z.object({ type: z.literal("save_resource"), ...identity, name: text(160), home: text(80), ownerId: id, profile: profileSchema.optional() }).strict(),
     z.object({ type: z.literal("set_resource_active"), ...toggle }).strict(),
-    z.object({ type: z.literal("save_mission"), ...identity, name: text(160), clientId: id }).strict(),
+    z.object({ type: z.literal("save_mission"), ...identity, name: text(160), clientId: id, engagement: engagementPlanSchema.optional() }).strict(),
     z.object({ type: z.literal("set_mission_active"), ...toggle }).strict(),
+    z.object({ type: z.literal("save_capability"), ...identity, kind: z.enum(["role", "skill"]), name: text(160), description: optionalText(2000) }).strict().refine(value => value.kind !== "skill" || value.name.length <= 100, { message: "Skill names must be 100 characters or fewer.", path: ["name"] }),
+    z.object({ type: z.literal("set_capability_active"), ...toggle }).strict(),
     z.object({ type: z.literal("save_playbook"), ...identity, kind, name: text(200), description: text(3000), sourceReference: text(500), requirements: z.array(requirement).min(1).max(50) }).strict(),
     z.object({ type: z.enum(["approve_playbook", "retire_playbook"]), id, expectedRevision: revision }).strict(),
     z.object({ type: z.literal("create_member"), ...member, subject: z.string().min(1).max(255).regex(/^[^\u0000-\u001f\u007f]+$/, "Use the exact verified identity subject without control characters."), identityVerified: z.literal(true) }).strict(),

@@ -11,7 +11,7 @@ async function addClient(page: Page, name: string, code: string) {
   await expect(dialog).toHaveCount(0);
 }
 
-test("open administration saves client, HOME, person and mission configuration across reloads without server calls", async ({ page }) => {
+test("open administration saves client, HOME, person and engagement configuration across reloads without server calls", async ({ page }) => {
   const apiCalls: string[] = [];
   page.on("request", request => { if (request.url().includes("/api/admin")) apiCalls.push(request.url()); });
   await page.goto("/admin");
@@ -43,16 +43,21 @@ test("open administration saves client, HOME, person and mission configuration a
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Test Teammate/ })).toBeVisible();
 
-  await section(page, "Missions").click();
-  await page.getByRole("button", { name: "Add mission", exact: true }).first().click();
+  await section(page, "Engagements").click();
+  await page.getByRole("button", { name: "Add engagement", exact: true }).first().click();
   dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Mission name", { exact: true }).fill("Solstice Launch");
+  await dialog.getByLabel("Engagement name", { exact: true }).fill("Solstice Launch");
   await dialog.getByRole("combobox", { name: "Client", exact: true }).selectOption({ label: "Solstice Test Client" });
-  await dialog.getByRole("button", { name: "Add mission", exact: true }).click();
+  await dialog.getByLabel("Engagement starts", { exact: true }).fill("2027-01-01");
+  await dialog.getByLabel("Engagement ends", { exact: true }).fill("2027-12-31");
+  await dialog.getByRole("button", { name: "Build the team", exact: true }).last().click();
+  await dialog.getByRole("button", { name: "Application build", exact: true }).click();
+  await dialog.getByRole("button", { name: "Review team plan", exact: true }).click();
+  await dialog.getByRole("button", { name: "Save engagement", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Solstice Launch/ })).toBeVisible();
   await page.reload();
-  await section(page, "Missions").click();
+  await section(page, "Engagements").click();
   await expect(page.getByRole("button", { name: /Solstice Launch/ })).toBeVisible();
   expect(apiCalls).toEqual([]);
 });

@@ -3,14 +3,15 @@ import { approveJourneyTemplate } from "../journeys/rules";
 import { JOURNEY_TEMPLATE_CATALOG } from "../journeys/templates";
 import type { JourneyTemplate, PermissionScope } from "../journeys/types";
 import { actorFor, OperationsError, type Membership, type OperationsQuery } from "../operations/service";
-import type { AdminBootstrap, AdminCommand, AdminGrant, AdminMember, AdminRequest } from "./contracts";
+import type { AdminBootstrap, AdminCapability, AdminCommand, AdminGrant, AdminMember, AdminRequest } from "./contracts";
+import { capabilityAliasesAfterRename, capabilitySchema, engagementPlanSchema, profileSchema } from "./engagement";
 
 function requireAdmin(member: Membership) {
   if (!member.active || member.role !== "administrator" || member.home_scope !== null) throw new OperationsError("forbidden", "An active organization administrator is required.", 403);
 }
 function conflict() { return new OperationsError("conflict", "This record changed. Reload its current values before saving.", 409); }
 function revision(actual: number, expected: number | undefined) { if (actual !== expected) throw conflict(); }
-type Table = "be_clients" | "be_homes" | "be_resources" | "be_missions" | "be_templates";
+type Table = "be_clients" | "be_homes" | "be_resources" | "be_missions" | "be_templates" | "be_capabilities";
 async function lock(db: OperationsQuery, org: string, table: Table, id: string) {
   const row = (await db.query(`SELECT * FROM ${table} WHERE organization_id=$1 AND id=$2 FOR UPDATE`, [org, id])).rows[0];
   if (!row) throw new OperationsError("not_found", "That record is unavailable in this organization.", 404);
@@ -43,13 +44,14 @@ export async function loadAdmin(db: OperationsQuery, member: Membership): Promis
   if (!organization) throw new OperationsError("not_found", "This organization is unavailable.", 404);
   const clients = (await db.query<{id:string;name:string;code:string;contact_name:string|null;contact_email:string|null;notes:string;active:boolean;revision:number}>("SELECT id,name,code,contact_name,contact_email,notes,active,revision FROM be_clients WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows.map(row => ({ id: row.id, name: row.name, code: row.code, contactName: row.contact_name ?? "", contactEmail: row.contact_email ?? "", notes: row.notes, active: row.active, revision: row.revision }));
   const homes = (await db.query<{id:string;code:string;name:string;description:string;active:boolean;revision:number}>("SELECT id,code,name,description,active,revision FROM be_homes WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows;
-  const resources = (await db.query<{id:string;name:string;home:string;owner_id:string;active:boolean;revision:number}>("SELECT id,name,home,owner_id,active,revision FROM be_resources WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows.map(row => ({ id: row.id, name: row.name, home: row.home, ownerId: row.owner_id, active: row.active, revision: row.revision }));
-  const missions = (await db.query<{id:string;name:string;client_id:string;active:boolean;revision:number}>("SELECT id,name,client_id,active,revision FROM be_missions WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows.map(row => ({ id: row.id, name: row.name, clientId: row.client_id, active: row.active, revision: row.revision }));
+  const resources = (await db.query<{id:string;name:string;home:string;owner_id:string;active:boolean;revision:number;profile:unknown}>("SELECT id,name,home,owner_id,active,revision,profile FROM be_resources WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows.map(row => ({ id: row.id, name: row.name, home: row.home, ownerId: row.owner_id, active: row.active, revision: row.revision, ...(row.profile ? { profile: profileSchema.parse(row.profile) } : {}) }));
+  const missions = (await db.query<{id:string;name:string;client_id:string;active:boolean;revision:number;engagement:unknown}>("SELECT id,name,client_id,active,revision,engagement FROM be_missions WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows.map(row => ({ id: row.id, name: row.name, clientId: row.client_id, active: row.active, revision: row.revision, ...(row.engagement ? { engagement: engagementPlanSchema.parse(row.engagement) } : {}) }));
+  const capabilities = (await db.query<AdminCapability>("SELECT id,kind,name,description,active,revision,aliases FROM be_capabilities WHERE organization_id=$1 ORDER BY kind,name,id LIMIT 1001", [org])).rows.map(row => capabilitySchema.parse(row));
   const members: AdminMember[] = (await db.query<Membership & {revision:number}>("SELECT id,name,role,resource_id,home_scope,active,revision,grants FROM be_memberships WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows.map(row => ({ id: row.id, name: row.name, role: row.role, resourceId: row.resource_id, homeScope: row.home_scope, active: row.active, revision: row.revision, grants: safeGrants(row.grants, org) }));
   const templates = (await db.query<{body:JourneyTemplate;revision:number}>("SELECT body,revision FROM be_templates WHERE organization_id=$1 ORDER BY kind,version DESC LIMIT 1001", [org])).rows.map(row => ({ ...row.body, revision: row.revision, persisted: true }));
   templates.push(...JOURNEY_TEMPLATE_CATALOG.filter(template => !templates.some(row => row.kind === template.kind)).map(template => ({ ...structuredClone(template), revision: 0, persisted: false })));
-  const hasMore = [clients, homes, resources, missions, members, templates].some(rows => rows.length > 1000);
-  return { organization, viewer: { id: member.id, name: member.name }, clients: clients.slice(0, 1000), homes: homes.slice(0, 1000), resources: resources.slice(0, 1000), missions: missions.slice(0, 1000), members: members.slice(0, 1000), templates: templates.slice(0, 1000), asOf: new Date().toISOString(), hasMore };
+  const hasMore = [clients, homes, resources, missions, capabilities, members, templates].some(rows => rows.length > 1000);
+  return { organization, viewer: { id: member.id, name: member.name }, clients: clients.slice(0, 1000), homes: homes.slice(0, 1000), resources: resources.slice(0, 1000), missions: missions.slice(0, 1000), capabilities: capabilities.slice(0, 1000), members: members.slice(0, 1000), templates: templates.slice(0, 1000), asOf: new Date().toISOString(), hasMore };
 }
 async function audit(db: OperationsQuery, member: Membership, operation: string, payload: Record<string, unknown>) {
   await db.query("INSERT INTO be_events(organization_id,id,actor_id,operation,payload) VALUES($1,$2,$3,$4,$5)", [member.organization_id, randomUUID(), member.id, `admin.${operation}`, JSON.stringify(payload)]);
@@ -100,8 +102,9 @@ async function applyAdmin(db: OperationsQuery, member: Membership, command: Admi
       if (command.id) {
         const current = await lock(db, org, "be_resources", id); revision(Number(current.revision), command.expectedRevision);
         if (current.home !== command.home && (await db.query("SELECT id FROM be_journeys WHERE organization_id=$1 AND resource_id=$2 LIMIT 1", [org, id])).rows.length) throw new OperationsError("historical_scope", "This teammate has journey history in their current HOME. A HOME migration needs a separate reviewed change; their name and owner can still be updated.");
-        await db.query("UPDATE be_resources SET name=$3,home=$4,owner_id=$5,revision=revision+1 WHERE organization_id=$1 AND id=$2", [org, id, command.name, command.home, command.ownerId]);
-      } else await db.query("INSERT INTO be_resources(organization_id,id,name,home,owner_id) VALUES($1,$2,$3,$4,$5)", [org, id, command.name, command.home, command.ownerId]);
+        const profile = command.profile ?? current.profile;
+        await db.query("UPDATE be_resources SET name=$3,home=$4,owner_id=$5,profile=$6,revision=revision+1 WHERE organization_id=$1 AND id=$2", [org, id, command.name, command.home, command.ownerId, profile ? JSON.stringify(profile) : null]);
+      } else await db.query("INSERT INTO be_resources(organization_id,id,name,home,owner_id,profile) VALUES($1,$2,$3,$4,$5,$6)", [org, id, command.name, command.home, command.ownerId, command.profile ? JSON.stringify(command.profile) : null]);
       await audit(db, member, command.type, { resourceId: id }); return;
     }
     case "save_mission": {
@@ -109,12 +112,30 @@ async function applyAdmin(db: OperationsQuery, member: Membership, command: Admi
       if (command.id) {
         const current = await lock(db, org, "be_missions", id); revision(Number(current.revision), command.expectedRevision);
         if (current.client_id !== command.clientId && (await db.query("SELECT 1 FROM be_assignment_references WHERE organization_id=$1 AND mission_id=$2 UNION ALL SELECT 1 FROM be_journeys WHERE organization_id=$1 AND mission_id=$2 LIMIT 1", [org, id])).rows.length) throw new OperationsError("historical_scope", "This mission has assignment or journey history. Create a new mission for a different client.");
-        await db.query("UPDATE be_missions SET name=$3,client_id=$4,client_name=$5,revision=revision+1 WHERE organization_id=$1 AND id=$2", [org, id, command.name, command.clientId, client.name]);
-      } else await db.query("INSERT INTO be_missions(organization_id,id,name,client_id,client_name) VALUES($1,$2,$3,$4,$5)", [org, id, command.name, command.clientId, client.name]);
+        const engagement = command.engagement ?? current.engagement;
+        await db.query("UPDATE be_missions SET name=$3,client_id=$4,client_name=$5,engagement=$6,revision=revision+1 WHERE organization_id=$1 AND id=$2", [org, id, command.name, command.clientId, client.name, engagement ? JSON.stringify(engagement) : null]);
+      } else await db.query("INSERT INTO be_missions(organization_id,id,name,client_id,client_name,engagement) VALUES($1,$2,$3,$4,$5,$6)", [org, id, command.name, command.clientId, client.name, command.engagement ? JSON.stringify(command.engagement) : null]);
       await audit(db, member, command.type, { missionId: id }); return;
     }
-    case "set_client_active": case "set_home_active": case "set_resource_active": case "set_mission_active": {
-      const table: Table = command.type === "set_client_active" ? "be_clients" : command.type === "set_home_active" ? "be_homes" : command.type === "set_resource_active" ? "be_resources" : "be_missions";
+    case "save_capability": {
+      // Serialize catalog naming within this organization so aliases cannot race
+      // another create or rename into an ambiguous role/skill identity.
+      await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`${org}:capability:${command.kind}`]);
+      const id = command.id ?? randomUUID(), current = command.id ? await lock(db, org, "be_capabilities", id) : null;
+      if (current) {
+        revision(Number(current.revision), command.expectedRevision);
+        if (current.kind !== command.kind) throw new OperationsError("immutable_kind", "Create a separate catalog entry for a different capability kind.");
+      }
+      const existing = current ? capabilitySchema.parse({ id: current.id, kind: current.kind, name: current.name, description: current.description, active: current.active, revision: current.revision, aliases: current.aliases }) : null;
+      const aliases = capabilityAliasesAfterRename(existing, command.name);
+      if (aliases.length > 50) throw new OperationsError("rename_limit", "This entry has 50 former names. Keep its current name or create a distinct new catalog entry.");
+      if ((await db.query("SELECT id FROM be_capabilities WHERE organization_id=$1 AND kind=$2 AND id<>$3 AND (lower(trim(name))=lower(trim($4)) OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(aliases) alias WHERE lower(trim(alias))=lower(trim($4)))) LIMIT 1", [org, command.kind, id, command.name])).rows.length) throw new OperationsError("duplicate", "That role or skill name is already used, including its former names.", 409);
+      if (current) await db.query("UPDATE be_capabilities SET name=$3,description=$4,aliases=$5,revision=revision+1 WHERE organization_id=$1 AND id=$2", [org, id, command.name, command.description, JSON.stringify(aliases)]);
+      else await db.query("INSERT INTO be_capabilities(organization_id,id,kind,name,description,aliases) VALUES($1,$2,$3,$4,$5,$6)", [org, id, command.kind, command.name, command.description, JSON.stringify(aliases)]);
+      await audit(db, member, command.type, { capabilityId: id, kind: command.kind }); return;
+    }
+    case "set_client_active": case "set_home_active": case "set_resource_active": case "set_mission_active": case "set_capability_active": {
+      const table: Table = command.type === "set_client_active" ? "be_clients" : command.type === "set_home_active" ? "be_homes" : command.type === "set_resource_active" ? "be_resources" : command.type === "set_capability_active" ? "be_capabilities" : "be_missions";
       // Parent configuration locks precede child locks, matching the edit paths.
       if (command.active && table === "be_missions") {
         const identified = (await db.query<{client_id:string}>("SELECT client_id FROM be_missions WHERE organization_id=$1 AND id=$2", [org, command.id])).rows[0];

@@ -10,6 +10,7 @@ import { executeOperation, loadOperations, type Membership, type OperationsQuery
 import { operationsRequestSchema } from "../lib/operations/validation";
 import type { OperationsCommand } from "../lib/operations/contracts";
 import { getJourneyTemplate } from "../lib/journeys/templates";
+import type { EngagementPlan } from "../lib/admin/engagement";
 
 const migrations = new URL("../db/migrations/", import.meta.url);
 const issuer = "https://identity.example.test/synthetic";
@@ -199,4 +200,69 @@ test("admin bootstrap announces capped configuration lists", async t => {
   const f=await fixture();t.after(()=>f.db.close());
   await f.db.query("INSERT INTO be_clients(organization_id,id,code,name) SELECT $1,gen_random_uuid(),'synthetic-'||n,'Synthetic '||n FROM generate_series(1,1001) n",[f.org]);
   const data=await f.load();assert.equal(data.clients.length,1000);assert.equal(data.hasMore,true);
+});
+
+test("SOW plans and delivery profiles persist with revisions, safe legacy edits and idempotent audit", async t => {
+  const f = await fixture(); t.after(() => f.db.close());
+  const client = await f.client();
+  const engagement: EngagementPlan = { version: 1, sowReference: "SOW-2030", status: "signed", signedOn: "2029-11-10", start: "2030-01-01", end: "2032-06-30", outcomes: "Private application delivery outcome", roles: [{ id: randomUUID(), name: "BA / PM", headcount: 1, allocationPercent: 50, skills: ["Agile", "Requirements"], responsibilities: "Boards, ceremonies and light testing", start: "2030-01-01", end: "2032-06-30" }] };
+  const key = randomUUID(), create: AdminCommand = { type: "save_mission", name: "Application build", clientId: client.id, engagement };
+  await f.execute(create, key); await f.execute(create, key);
+  let mission = (await f.load()).missions[0];
+  assert.equal((await f.load()).missions.length, 1); assert.equal(mission.revision, 1);
+  assert.deepEqual(mission.engagement, engagement);
+  await f.execute({ type: "save_mission", id: mission.id, expectedRevision: 1, name: "Renamed build", clientId: client.id });
+  mission = (await f.load()).missions[0];
+  assert.deepEqual(mission.engagement, engagement); assert.equal(mission.revision, 2);
+  await assert.rejects(f.execute({ type: "save_mission", id: mission.id, expectedRevision: 1, name: "Stale", clientId: client.id, engagement }), code("conflict"));
+  const profile = { roles: ["BA / PM"], skills: ["Agile", "Requirements", "Testing"] };
+  await f.execute({ type: "save_resource", id: f.resourceId, expectedRevision: 1, name: "Synthetic teammate", home: "Data", ownerId: f.admin.id, profile });
+  await f.execute({ type: "save_resource", id: f.resourceId, expectedRevision: 2, name: "Renamed teammate", home: "Data", ownerId: f.admin.id });
+  const resource = (await f.load()).resources[0];
+  assert.equal(resource.revision, 3); assert.deepEqual(resource.profile, profile);
+  const events = JSON.stringify((await f.db.query("SELECT payload FROM be_events")).rows);
+  assert.equal(events.includes(engagement.outcomes), false); assert.equal(events.includes("Requirements"), false);
+  assert.deepEqual((await f.load(f.foreign)).missions, []); assert.deepEqual((await f.load(f.foreign)).resources, []);
+  assert.equal((await f.operations()).journeys.length, 0, "Demand and skill changes never create staffing or journeys.");
+});
+
+test("engagement and profile storage retains organization isolation and rejects malformed bodies", async t => {
+  const f = await fixture(); t.after(() => f.db.close());
+  const client = await f.client();
+  await f.execute({ type: "save_mission", name: "Existing legacy mission", clientId: client.id });
+  const mission = (await f.load()).missions[0];
+  assert.equal(mission.engagement, undefined); assert.equal((await f.load()).resources[0].profile, undefined);
+  await assert.rejects(f.execute({ type: "save_mission", id: mission.id, expectedRevision: 1, name: "Foreign", clientId: client.id }, randomUUID(), f.foreign), code("invalid_client"));
+  await assert.rejects(f.execute({ type: "save_resource", id: f.resourceId, expectedRevision: 1, name: "Foreign", home: "Data", ownerId: f.foreign.id, profile: { roles: [], skills: [] } }, randomUUID(), f.foreign), code("not_found"));
+  await assert.rejects(f.execute({ type: "save_mission", name: "No authority", clientId: client.id }, randomUUID(), f.reviewer), code("forbidden"));
+  const foreignUpdate = await f.transaction(f.foreign, db => db.query("UPDATE be_missions SET engagement=$1 WHERE id=$2 RETURNING id", [JSON.stringify({ version: 1, status: "draft", roles: [{}] }), mission.id]));
+  assert.deepEqual(foreignUpdate.rows, []);
+  await assert.rejects(f.db.query("UPDATE be_missions SET engagement='{}'::jsonb WHERE id=$1", [mission.id]), code("23514"));
+  await assert.rejects(f.db.query("UPDATE be_resources SET profile='{}'::jsonb WHERE id=$1", [f.resourceId]), code("23514"));
+});
+
+test("shared role and skill catalogs preserve aliases with scoped revision-checked administration", async t => {
+  const f = await fixture(); t.after(() => f.db.close());
+  const key = randomUUID(), create: AdminCommand = { type: "save_capability", kind: "role", name: "Business analyst", description: "Requirements" };
+  await f.execute(create, key); await f.execute(create, key);
+  let item = (await f.load()).capabilities![0];
+  assert.equal(item.revision, 1); assert.deepEqual(item.aliases, []);
+  await f.execute({ type: "save_capability", id: item.id, expectedRevision: 1, kind: "role", name: "BA / PM", description: "Requirements and delivery" });
+  item = (await f.load()).capabilities![0];
+  assert.equal(item.revision, 2); assert.deepEqual(item.aliases, ["Business analyst"]);
+  await assert.rejects(f.execute({ type: "save_capability", kind: "role", name: "BUSINESS ANALYST", description: "Duplicate former name" }), code("duplicate"));
+  await assert.rejects(f.execute({ type: "save_capability", id: item.id, expectedRevision: 2, kind: "skill", name: "BA / PM", description: "Changed kind" }), code("immutable_kind"));
+  await assert.rejects(f.execute({ type: "save_capability", id: item.id, expectedRevision: 1, kind: "role", name: "Stale", description: "" }), code("conflict"));
+  await f.execute({ type: "set_capability_active", id: item.id, expectedRevision: 2, active: false });
+  await assert.rejects(f.execute(create), code("duplicate"));
+  await f.execute({ type: "save_capability", id: item.id, expectedRevision: 3, kind: "role", name: "Business analyst", description: "Rename back" });
+  item = (await f.load()).capabilities![0];
+  assert.equal(item.active, false); assert.deepEqual(item.aliases, ["BA / PM"]);
+  await f.execute({ type: "save_capability", kind: "skill", name: "Business analyst", description: "A separate skill identity" });
+  assert.equal((await f.load()).capabilities!.length, 2);
+  assert.deepEqual((await f.load(f.foreign)).capabilities, []);
+  await assert.rejects(f.execute({ type: "set_capability_active", id: item.id, expectedRevision: 4, active: true }, randomUUID(), f.foreign), code("not_found"));
+  await assert.rejects(f.execute(create, randomUUID(), f.reviewer), code("forbidden"));
+  await assert.rejects(f.transaction(f.admin, db => db.query("DELETE FROM be_capabilities WHERE id=$1", [item.id])), code("42501"));
+  await assert.rejects(f.db.query("UPDATE be_capabilities SET kind='skill' WHERE id=$1", [item.id]), code("22023"));
 });

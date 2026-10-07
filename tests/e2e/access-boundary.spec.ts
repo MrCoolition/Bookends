@@ -54,11 +54,11 @@ test("Administration is discoverable from the app navigation and command search"
   await page.goto("/");
   await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link", { name: "Administration", exact: true }).click();
   await expect(page).toHaveURL(/\/admin$/);
-  for (const name of ["Clients", "HOMEs", "People", "Missions", "Playbooks", "Access & settings"])
+  for (const name of ["Clients", "HOMEs", "People", "Engagements", "Roles & skills", "Playbooks", "Access & settings"])
     await expect(page.getByRole("navigation", { name: "Administration sections" }).getByRole("button", { name: new RegExp(name) })).toBeVisible();
   await expect(page.getByText(/saved in this browser/i).first()).toBeVisible();
   await page.goto("/");
-  await page.keyboard.press("Control+k");
+  await page.getByRole("button", { name: /Jump to anything/ }).click();
   await page.getByRole("textbox", { name: "Search everything" }).fill("admin");
   await page.getByRole("dialog").getByRole("link", { name: "Administration", exact: true }).click();
   await expect(page).toHaveURL(/\/admin$/);

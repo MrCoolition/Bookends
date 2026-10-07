@@ -6,8 +6,8 @@ import { assignmentsFor, formatDate, inclusiveEnd, missionFor, nextRelease, open
 import type { DemoState, Mission, Obligation, Person } from "@/lib/types";
 import { Avatar, HomeBadge, Status } from "./ui";
 
-export function PersonDetail({ person, state, onPlan, onEvidence, onAcknowledge, onReport }: { person: Person; state: DemoState; onPlan: (id: string) => void; onEvidence: (id: string, evidence: string) => void; onAcknowledge: (id: string) => void; onReport: (personId: string, text: string) => void }) {
-  const [tab, setTab] = useState("overview");
+export function PersonDetail({ person, state, onPlan, onEvidence, onAcknowledge, onReport, initialTab = "overview" }: { initialTab?: "overview" | "baggage"; person: Person; state: DemoState; onPlan: (id: string) => void; onEvidence: (id: string, evidence: string) => void; onAcknowledge: (id: string) => void; onReport: (personId: string, text: string) => void }) {
+  const [tab, setTab] = useState<string>(initialTab);
   const [report, setReport] = useState("");
   const release = nextRelease(person.id);
   const landing = release && assignmentsFor(person.id).find(a=>a.start>=release.end && a.staffing==="committed");

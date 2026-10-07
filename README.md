@@ -6,7 +6,9 @@ This repository contains the **synthetic staffing preview** at `/demo` and an **
 
 Until operational activation, `/` remains the fictional design preview. Do not enter real employee or client information there. Setting `BOOKENDS_MODE=production` routes `/` to the protected journey workspace; `/demo` stays explicitly synthetic.
 
-`/admin` provides clients, HOMEs, people, missions, versioned playbooks, role planning, and organization settings. The current interim release sets `BOOKENDS_ADMIN_MODE=local` so the forms open without sign-in and save to this browser. A downloadable Excel template seeds the four core lists through a validated, reviewed batch import; JSON export/import backs up the complete configuration. This configuration is separate from the synthetic staffing preview and the protected operational database. Shared administration still requires activation; `BOOKENDS_MODE=production` always uses the protected workspace. See [everyday administration](docs/administration.md).
+`/admin` provides clients, HOMEs, teammate profiles, SOW engagements, a configurable Roles & skills catalog, versioned playbooks, and access settings. The engagement wizard starts with the SOW and months-long delivery dates, then captures role headcount, allocation, skills, responsibilities, and phased dates before review. Existing mission IDs and journey history are retained. Profile matches show recorded role/skill alignment; they do not check availability or assign teammates.
+
+The current interim release sets `BOOKENDS_ADMIN_MODE=local` so administration opens without sign-in and saves to this browser. The Excel template seeds HOMEs, Clients, People, Engagements, Engagement roles, Roles, and Skills; the legacy Missions sheet remains supported. Validated imports merge reviewed changes and preserve unmentioned records. JSON export/import backs up the whole configuration. Local setup remains separate from the synthetic staffing preview and the protected operational database. Shared administration requires activation; `BOOKENDS_MODE=production` always uses the protected workspace. See [everyday administration](docs/administration.md) for the workflow and exact Excel columns.
 
 ## Run locally
 
@@ -30,7 +32,7 @@ With a development or production server running on port 3000, `npm run test:e2e`
 
 ## Explore the demo
 
-- **Runway:** four HOME groups, 13/26/52-week horizons, precise dates, person/skill search, metrics that filter their underlying records, a semantic table, and a dedicated phone view.
+- **Runway:** four HOME groups, 13/26/52-week horizons, precise dates, person/skill search, a semantic table, and a dedicated phone view. People metrics open focused action lists with direct planning and blocker-review buttons, preserving HOME, search, and horizon filters.
 - **Missions:** client mission cards, commercial state, funded demand, existing assignments, and open-demand filters.
 - **Decisions:** owned landing gaps, start prerequisites, unanswered updates, reported questions, and demo scenario review requests.
 - **My Bookends:** a person's itinerary, confirmed versus unknown next landing, evidence submission, and explicit acknowledgment of a specific update.
@@ -57,6 +59,9 @@ Reset the synthetic workspace from **Appearance and demo settings → Reset demo
 | `lib/planning.ts` | Available weekly hours and feasible placement suggestions |
 | `components/production-workspace.tsx` | Company and mission journeys, step ownership, help, evidence, verification, in-app updates |
 | `components/admin-workspace.tsx`, `lib/admin/` | Configuration forms, scoped administration commands, versioning and account management |
+| `components/engagement-editor.tsx`, `lib/admin/engagement.ts` | SOW and delivery-team wizard, role/skill alignment and phased demand summaries |
+| `components/capability-editor.tsx` | Configurable delivery roles and skills, with retained former names |
+| `lib/admin/spreadsheet.ts`, `scripts/build-seed-template.mjs` | Atomic Excel setup import and reproducible blank template builder |
 | `lib/journeys/` | Versioned playbooks, prerequisite transitions, scoped action readiness |
 | `lib/operations/` | Strict commands, authenticated membership, SQL transactions, redacted projections |
 | `auth.ts`, `lib/auth/` | Fixed-issuer OIDC sign-in and server identity |
@@ -66,7 +71,7 @@ Reset the synthetic workspace from **Appearance and demo settings → Reset demo
 
 ## Planning semantics
 
-Business intervals are stored as `[start, end)` and displayed with an inclusive last day. The demo uses explicit equal-hours Monday–Friday calendars in America/New_York, with no holidays, leave, or internal reservations. Business-date arithmetic does not convert a date through the viewer's timezone.
+Staffing intervals use `[start, end)` and display an inclusive last day. Admin SOW engagement and role-demand dates are stored as inclusive calendar dates. Engagement demand uses headcount × allocation percentage, with peak FTE accounting for overlapping role dates; it assumes no fixed 40-hour week and creates no staffing assignments. The demo uses explicit equal-hours Monday–Friday calendars in America/New_York, with no holidays, leave, or internal reservations. Business-date arithmetic does not convert a date through the viewer's timezone.
 
 Only commercially authorized, committed assignments count toward confirmed funded coverage. A blocked start retains its accepted capacity reservation. Proposed work and scenario moves do not count as confirmed coverage. Contractor unassigned hours are availability, not W2 bench. Evidence submission remains awaiting independent verification, and acknowledgment is not assignment acceptance.
 
@@ -76,4 +81,8 @@ The synthetic planner supports quarter-hour weekly inputs. Suggestions prefer th
 
 The app builds as a standard Next.js project on Vercel. Use `npm ci`, `npm run verify`, and the Next.js framework preset. The release command checks TypeScript, domain and database/service tests, then builds. No environment variables are needed for the synthetic preview. Operational variables are documented in `.env.example`; actual values belong only in ignored local files and deployment secrets.
 
-The connected Vercel project deploys pushes to `main`. A deployment never runs migrations or provisions identities. Email delivery, transactional staffing, and external employment/access changes are not enabled by the journey workspace. The supplied developer specification remains the source for full V1 acceptance.
+The connected Vercel project deploys pushes to `main`. A deployment never runs migrations or provisions identities. Apply migration `0003_engagement_planning.sql` through `npm run db:migrate` before activating this release's protected administration; it adds SOW plans, teammate profiles, and the organization-scoped capability catalog while retaining existing mission identities. Email delivery, transactional staffing, and external employment/access changes are not enabled by the journey workspace. The supplied developer specification remains the source for full V1 acceptance.
+
+## Rebuild the Excel template
+
+`scripts/build-seed-template.mjs` uses the bundled `@oai/artifact-tool` runtime, without adding application dependencies. Set `BOOKENDS_ARTIFACT_NODE_MODULES` to that runtime's `node_modules` directory and `BOOKENDS_ARTIFACT_PYTHON` to its Python executable, then run the script with the bundled Node executable. Use `load_workspace_dependencies` in Codex to locate those paths. The builder writes `public/templates/BOOKENDS_Seed_Template.xlsx` and ignored previews under `.tmp/bookends-seed/`; `--render-before` only inspects and renders the current guide. Review the generated tabs and run the spreadsheet tests after changing the template.
