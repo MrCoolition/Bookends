@@ -5,12 +5,13 @@ import { AlertCircle, ArrowLeft, Check, Download, Monitor, RefreshCw, Upload, X 
 import { AdminWorkspace } from "./admin-workspace";
 import { AdminSpreadsheetImport } from "./admin-spreadsheet-import";
 import type { SpreadsheetImportPlan } from "@/lib/admin/spreadsheet";
-import { applyLocalAdminCommand, createLocalAdminStore, parseLocalAdminStore, MAX_LOCAL_ADMIN_BYTES, type LocalAdminCommand, type LocalAdminStore } from "@/lib/admin/local";
+import { applyLocalAdminCommand, createLocalAdminStore, parseLocalAdminStore, LocalAdminError, MAX_LOCAL_ADMIN_BYTES, type LocalAdminCommand, type LocalAdminStore } from "@/lib/admin/local";
+import { seedLocalAdminClients } from "@/lib/admin/client-seed";
 
 const STORAGE_KEY = "bookends.local-admin.v1";
 const LOCK_NAME = "bookends.local-admin.write.v1";
 const MAX_BACKUP_BYTES = MAX_LOCAL_ADMIN_BYTES;
-type BackupReview = { store: LocalAdminStore; name: string; expectedRaw: string | null };
+type BackupReview = { store: LocalAdminStore; name: string; expectedRaw: string | null; startingClientsAdded: number };
 class LocalConflict extends Error { readonly code = "conflict"; }
 function errorText(error: unknown) { return error instanceof Error && error.message.length <= 400 ? error.message : "This change couldn’t be saved. Your current setup has not been replaced."; }
 function savedRaw() {
@@ -56,9 +57,25 @@ export function LocalAdminWorkspace() {
     const load = async () => {
       try {
         let raw = savedRaw();
-        if (raw === null) raw = await withWriteLock(() => { const existing = savedRaw(); return existing ?? persist(createLocalAdminStore()); });
-        const next = readSaved(raw);
-        if (active) accept(next, raw);
+        let next = raw === null ? null : readSaved(raw);
+        if (!next || next.clientSeedVersion !== 1) {
+          const initialized = await withWriteLock(() => {
+            const existingRaw = savedRaw();
+            const existing = existingRaw === null ? createLocalAdminStore() : readSaved(existingRaw);
+            try {
+              const seeded = seedLocalAdminClients(existing);
+              return { store: seeded, raw: existingRaw === null || seeded.revision !== existing.revision ? persist(seeded) : existingRaw, notice: "" };
+            } catch (error) {
+              if (existingRaw !== null && error instanceof LocalAdminError && ["client_seed_limit", "too_large"].includes(error.code)) {
+                return { store: existing, raw: existingRaw, notice: "Your saved setup is open, but the starting clients could not be added because it is at the browser storage limit. Export a backup before making space." };
+              }
+              throw error;
+            }
+          });
+          next = initialized.store; raw = initialized.raw;
+          if (active) setNotice(initialized.notice);
+        }
+        if (active) accept(next, raw!);
       } catch (error) { if (active) setLoadError(errorText(error)); }
     };
     void load();
@@ -101,10 +118,11 @@ export function LocalAdminWorkspace() {
     setBackupError(""); setNotice("");
     try {
       if (file.size > MAX_BACKUP_BYTES) throw new Error("Choose a BOOKENDS backup smaller than 4 MB.");
-      const candidate = parseLocalAdminStore(JSON.parse(await file.text()));
+      const parsed = parseLocalAdminStore(JSON.parse(await file.text()));
+      const candidate = seedLocalAdminClients(parsed);
       const expectedRaw = savedRaw();
       if (storeRef.current && expectedRaw !== rawRef.current) { setChangedElsewhere(true); throw new LocalConflict("Another tab changed this setup. Refresh to review it, then choose your backup again."); }
-      setBackup({ store: candidate, name: file.name, expectedRaw });
+      setBackup({ store: candidate, name: file.name, expectedRaw, startingClientsAdded: candidate.data.clients.length - parsed.data.clients.length });
     } catch (error) { setBackupError(error instanceof LocalConflict ? error.message : "This file is not a valid BOOKENDS setup backup. Your saved setup has not changed."); }
   };
   const replaceWithBackup = async () => {
@@ -166,5 +184,5 @@ function BackupDialog({ backup, current, busy, error, onClose, onReplace }: { ba
   const ref = useRef<HTMLDialogElement>(null); const [confirmed, setConfirmed] = useState(false);
   useEffect(() => { const active = document.activeElement as HTMLElement | null; const dialog = ref.current; dialog?.showModal(); return () => { dialog?.close(); requestAnimationFrame(() => active?.focus()); }; }, []);
   const collections = [{ key: "clients" as const, label: "Clients" }, { key: "homes" as const, label: "HOMEs" }, { key: "resources" as const, label: "People" }, { key: "missions" as const, label: "Engagements" }, { key: "capabilities" as const, label: "Roles & skills" }, { key: "templates" as const, label: "Playbooks" }, { key: "members" as const, label: "Members" }];
-  return <dialog ref={ref} className="admin-dialog admin-local-import" aria-labelledby="backup-review-title" onCancel={event => { event.preventDefault(); onClose(); }}><header><div><p className="admin-eyebrow">BACKUP REVIEW</p><h2 id="backup-review-title">Review before replacing.</h2></div><button className="admin-icon-button" aria-label="Close backup review" disabled={busy} onClick={onClose}><X size={20} /></button></header><div className="admin-dialog-body"><p className="admin-form-intro">Importing <strong>{backup.name}</strong> replaces this browser’s entire setup. It does not merge records or upload them to a server.</p><div className="admin-import-organization"><span>Workspace in this backup</span><strong>{backup.store.data.organization.name}</strong></div><p className="admin-import-caption">Currently open <span aria-hidden="true">→</span> In this backup</p><dl className="admin-import-counts">{collections.map(({ key, label }) => <div key={key}><dt>{label}</dt><dd>{current?.data[key]?.length ?? 0} <span aria-hidden="true">→</span> <strong>{backup.store.data[key]?.length ?? 0}</strong></dd></div>)}</dl><form className="admin-form" onSubmit={event => { event.preventDefault(); if (confirmed) onReplace(); }}><label className="admin-checkbox"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} required disabled={busy} /><span>I understand this replaces the saved setup in this browser. I have exported anything I want to keep.</span></label>{error && <p className="admin-error" role="alert">{error}</p>}<div className="admin-form-footer"><button type="button" className="admin-button admin-secondary" disabled={busy} onClick={onClose}>Keep current setup</button><button className="admin-button admin-primary" disabled={!confirmed || busy}>{busy ? "Replacing…" : "Replace browser setup"}<Upload size={15} /></button></div></form></div></dialog>;
+  return <dialog ref={ref} className="admin-dialog admin-local-import" aria-labelledby="backup-review-title" onCancel={event => { event.preventDefault(); onClose(); }}><header><div><p className="admin-eyebrow">BACKUP REVIEW</p><h2 id="backup-review-title">Review before replacing.</h2></div><button className="admin-icon-button" aria-label="Close backup review" disabled={busy} onClick={onClose}><X size={20} /></button></header><div className="admin-dialog-body"><p className="admin-form-intro">Importing <strong>{backup.name}</strong> replaces this browser’s entire setup. It does not merge records or upload them to a server.</p>{backup.startingClientsAdded > 0 && <p className="admin-form-intro">This older backup will also include {backup.startingClientsAdded} missing starting clients from your company list.</p>}<div className="admin-import-organization"><span>Workspace in this backup</span><strong>{backup.store.data.organization.name}</strong></div><p className="admin-import-caption">Currently open <span aria-hidden="true">→</span> After restore</p><dl className="admin-import-counts">{collections.map(({ key, label }) => <div key={key}><dt>{label}</dt><dd>{current?.data[key]?.length ?? 0} <span aria-hidden="true">→</span> <strong>{backup.store.data[key]?.length ?? 0}</strong></dd></div>)}</dl><form className="admin-form" onSubmit={event => { event.preventDefault(); if (confirmed) onReplace(); }}><label className="admin-checkbox"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} required disabled={busy} /><span>I understand this replaces the saved setup in this browser. I have exported anything I want to keep.</span></label>{error && <p className="admin-error" role="alert">{error}</p>}<div className="admin-form-footer"><button type="button" className="admin-button admin-secondary" disabled={busy} onClick={onClose}>Keep current setup</button><button className="admin-button admin-primary" disabled={!confirmed || busy}>{busy ? "Replacing…" : "Replace browser setup"}<Upload size={15} /></button></div></form></div></dialog>;
 }

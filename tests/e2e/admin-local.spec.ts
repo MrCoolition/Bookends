@@ -72,7 +72,7 @@ test("local setup backup restores only after review and local members need no pr
   const chunks: Buffer[] = [];
   for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
   const backup = { name: "bookends-test-backup.json", mimeType: "application/json", buffer: Buffer.concat(chunks) };
-  expect(JSON.parse(backup.buffer.toString()).data.clients).toHaveLength(1);
+  expect(JSON.parse(backup.buffer.toString()).data.clients).toHaveLength(10);
   await addClient(page, "Added after backup", "LATER");
   await page.getByLabel("Choose a BOOKENDS backup", { exact: true }).setInputFiles(backup);
   let review = page.getByRole("dialog", { name: "Review before replacing." });

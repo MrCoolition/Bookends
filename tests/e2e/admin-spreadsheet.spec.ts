@@ -82,7 +82,8 @@ test("downloaded Excel template seeds linked records, survives reload, skips rep
   await expect(page.getByRole("button", { name: /Solstice Launch/ })).toBeVisible();
   const saved = JSON.parse((await snapshot(page))!);
   expect(saved.data.resources[0].home).toBe("STUDIO");
-  expect(saved.data.missions[0].clientId).toBe(saved.data.clients[0].id);
+  const savedClient = saved.data.clients.find((client: { code: string }) => client.code === "SOLSTICE");
+  expect(saved.data.missions[0].clientId).toBe(savedClient.id);
   review = await reviewFile(page, filledTemplate(bytes, seed));
   await expect(review.locator(".admin-excel-totals")).toHaveText(/0 to add.*0 to update.*4 unchanged/);
   await expect(review.getByRole("button", { name: "Apply import", exact: true })).toBeDisabled();
@@ -96,11 +97,12 @@ test("downloaded Excel template seeds linked records, survives reload, skips rep
   await review.getByRole("button", { name: "Apply import", exact: true }).click();
   await expect(review).toHaveCount(0);
   const after = JSON.parse((await snapshot(page))!);
-  expect(after.data.clients).toHaveLength(1);
-  expect(after.data.clients[0].id).toBe(saved.data.clients[0].id);
-  expect(after.data.clients[0].name).toBe("Solstice Renamed");
-  expect(after.data.clients[0].notes).toBe("Updated notes");
-  expect(after.data.missions[0].clientId).toBe(saved.data.clients[0].id);
+  const updatedClient = after.data.clients.find((client: { code: string }) => client.code === "SOLSTICE");
+  expect(after.data.clients).toHaveLength(10);
+  expect(updatedClient.id).toBe(savedClient.id);
+  expect(updatedClient.name).toBe("Solstice Renamed");
+  expect(updatedClient.notes).toBe("Updated notes");
+  expect(after.data.missions[0].clientId).toBe(savedClient.id);
   expect(errors).toEqual([]);
 });
 

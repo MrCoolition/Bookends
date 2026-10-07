@@ -7,7 +7,7 @@ import { adminRequestSchema } from "./validation";
 import { capabilityAliasesAfterRename, capabilityNameKey, capabilitySchema, engagementPlanSchema, profileSchema } from "./engagement";
 
 /** Browser-local configuration only. These records never establish an authenticated identity or permission. */
-export type LocalAdminStore = { version: 1; revision: number; data: AdminBootstrap };
+export type LocalAdminStore = { version: 1; revision: number; clientSeedVersion?: 1; data: AdminBootstrap };
 export type LocalAdminCommand = AdminCommand | {
   type: "create_local_member"; name: string; role: JourneyRole; resourceId: string | null;
   homeScope: string | null; grants: AdminGrant[];
@@ -16,6 +16,7 @@ export const LOCAL_ADMIN_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001
 export const LOCAL_ADMIN_OWNER_ID = "00000000-0000-4000-8000-000000000002";
 export const MAX_LOCAL_ADMIN_BYTES = 4 * 1024 * 1024;
 const MAX_RECORDS = 1000;
+export const MAX_LOCAL_ADMIN_CLIENTS = MAX_RECORDS;
 export class LocalAdminError extends Error {
   constructor(public readonly code: string, message: string) { super(message); this.name = "LocalAdminError"; }
 }
@@ -39,7 +40,7 @@ const templateSchema = z.object({
   requirements: z.array(z.unknown()).min(1).max(50), revision: z.int().min(0).max(2_147_483_647), persisted: z.boolean(),
 }).strict();
 const storeSchema = z.object({
-  version: z.literal(1), revision: rev, data: z.object({
+  version: z.literal(1), revision: rev, clientSeedVersion: z.literal(1).optional(), data: z.object({
     organization: z.object({ id: z.literal(LOCAL_ADMIN_ORGANIZATION_ID), name: text(200), revision: rev }).strict(),
     viewer: z.object({ id: z.literal(LOCAL_ADMIN_OWNER_ID), name: text(160) }).strict(),
     clients: z.array(z.object({ ...recordFields, name: text(160), code: text(80), contactName: optionalText(160), contactEmail: z.union([z.literal(""), z.email().max(254)]), notes: optionalText(4000) }).strict()).max(MAX_RECORDS),
@@ -157,7 +158,7 @@ export function parseLocalAdminStore(input: unknown): LocalAdminStore {
   });
   const data: AdminBootstrap = { ...parsed.data, templates, hasMore: false };
   validateLinks(data);
-  return { version: 1, revision: parsed.revision, data };
+  return { version: 1, revision: parsed.revision, ...(parsed.clientSeedVersion ? { clientSeedVersion: parsed.clientSeedVersion } : {}), data };
 }
 
 export function createLocalAdminStore(): LocalAdminStore {

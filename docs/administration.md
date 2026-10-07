@@ -8,6 +8,8 @@ The current release enables local administration without sign-in. Configure clie
 
 Changes save in this browser on this site. They survive a refresh, but do not sync to another browser, device, or the fictional staffing preview. Use **Export setup** to keep a JSON backup. **Import setup** validates a backup and asks before replacing this browser's configuration. Clearing browser storage removes the local copy. A failed browser save is reported instead of claiming success.
 
+The deployed setup starts with the nine company-provided clients: Big 4, TQL, Nisource, Compass, Vantive, Others, Chipotle, Safelite, and First Bank of Ohio. New browsers and older setups receive missing clients once. Existing matches retain their IDs, names, contacts, and inactive status; later renames and archives are preserved. Older backup reviews include any missing starting clients before you confirm restoration. This starting list is deployed with the app; subsequent edits still remain in each browser.
+
 This mode is selected by `BOOKENDS_ADMIN_MODE=local`. Set it to `protected` to return to sign-in. `BOOKENDS_MODE=production` always uses protected administration. The operational API and database remain separate; importing a local backup does not activate accounts or publish policies to them.
 
 ## Plan an engagement around its SOW
