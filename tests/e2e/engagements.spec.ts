@@ -96,6 +96,8 @@ test("a signed 18-month application engagement saves a role-based team with frac
   await expect(roleRows(dialog).nth(2).getByLabel("Allocation per person (%)", { exact: true })).toHaveValue("50");
   await action(dialog, "Review team plan").click();
   await action(dialog, "Save engagement").click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Meridian application build — launch phase/ })).toBeVisible();
   const after = (await saved(page)).data.missions[0];
   expect(after.id).toBe(initial.id);
   expect(after.revision).toBe(initial.revision + 1);
