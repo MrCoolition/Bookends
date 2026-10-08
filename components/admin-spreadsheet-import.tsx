@@ -7,6 +7,7 @@ import type { SpreadsheetImportPlan } from "@/lib/admin/spreadsheet";
 type Props = {
   disabled?: boolean;
   storageMode?: "browser" | "shared";
+  compact?: boolean;
   onPreview: (file: File) => Promise<SpreadsheetImportPlan>;
   onApply: (plan: SpreadsheetImportPlan) => Promise<void>;
   onDiscard: () => void;
@@ -15,7 +16,7 @@ const MAX_VISIBLE_ERRORS = 25;
 const MAX_VISIBLE_CHANGES = 40;
 function message(error: unknown) { return error instanceof Error && error.message.length < 500 ? error.message : "The workbook could not be processed. Use the BOOKENDS Excel template and try again."; }
 
-export function AdminSpreadsheetImport({ disabled = false, storageMode = "browser", onPreview, onApply, onDiscard }: Props) {
+export function AdminSpreadsheetImport({ disabled = false, storageMode = "browser", compact = false, onPreview, onApply, onDiscard }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const confirmFormId = useId();
   const [open, setOpen] = useState(false);
@@ -45,7 +46,7 @@ export function AdminSpreadsheetImport({ disabled = false, storageMode = "browse
     finally { applyingRef.current = false; setApplying(false); }
   };
   const changes = plan ? plan.counts.adds + plan.counts.updates : 0;
-  return <><div className="admin-excel-controls"><a className="admin-button admin-secondary" href="/templates/BOOKENDS_Seed_Template.xlsx" download><Download size={15} /> Download Excel template</a><button className="admin-button admin-primary" disabled={disabled || reading || applying} onClick={() => fileRef.current?.click()}><FileSpreadsheet size={16} /> Import Excel</button><input ref={fileRef} className="admin-local-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Choose an Excel workbook" onChange={event => void choose(event)} /></div>
+  return <><div className={`admin-excel-controls${compact ? " is-compact" : ""}`}><a className="admin-button admin-secondary" href="/templates/BOOKENDS_Seed_Template.xlsx" download aria-label="Download Excel template" title="Download Excel template"><Download size={15} /><span>{compact ? "Excel template" : "Download Excel template"}</span></a><button className="admin-button admin-primary" disabled={disabled || reading || applying} onClick={() => fileRef.current?.click()}><FileSpreadsheet size={16} /> Import Excel</button><input ref={fileRef} className="admin-local-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Choose an Excel workbook" onChange={event => void choose(event)} /></div>
     {open && <SpreadsheetDialog onClose={close} busy={applying}><div className="admin-excel-file"><FileSpreadsheet size={25} /><div><strong>{fileName}</strong><span>Excel workbook · reviewed before saving</span></div></div>
       {reading ? <div className="admin-excel-reading" role="status"><LoaderCircle className="admin-excel-spinner" size={25} /><h3>Checking your workbook.</h3><p>Reading the sheets and matching them with your saved setup.</p></div> : <>
         {plan && <><p className="admin-form-intro">Nothing is saved yet. This import adds new records and updates matching records. Existing records are kept.</p><p className="admin-excel-totals"><strong>{plan.counts.adds}</strong> to add <span>·</span> <strong>{plan.counts.updates}</strong> to update <span>·</span> <strong>{plan.counts.skips}</strong> unchanged</p>

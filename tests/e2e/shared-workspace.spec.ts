@@ -62,6 +62,7 @@ test("shared administration reveals no client data before unlock and supports lo
   await expect(page.getByRole("link", { name: /Team Studio/ })).toHaveAttribute("href", "/studio");
   await expect(page.getByText("Changes are saved to the shared workspace and available in every signed-in browser.")).toBeVisible();
   expect(state.writes).toEqual([]);
+  await page.getByLabel("Workspace options", { exact: true }).click();
   await page.getByRole("button", { name: "Lock workspace", exact: true }).click();
   await expect(page.getByLabel("Workspace passcode", { exact: true })).toBeVisible();
   await expect(page.getByText("Shared Test Client", { exact: true })).toHaveCount(0);

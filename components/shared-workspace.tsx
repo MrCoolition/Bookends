@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { AlertCircle, ArrowRight, Check, Cloud, Download, LockKeyhole, LogOut, RefreshCw, Upload, X } from "lucide-react";
+import { AlertCircle, ArrowRight, Check, Cloud, Download, LockKeyhole, LogOut, MoreHorizontal, RefreshCw, Upload, X } from "lucide-react";
 import type { AdminBootstrap } from "@/lib/admin/contracts";
 import { MAX_LOCAL_ADMIN_BYTES, parseLocalAdminStore, type LocalAdminCommand, type LocalAdminStore } from "@/lib/admin/local";
 import { STARTING_CLIENTS } from "@/lib/admin/client-seed";
@@ -43,6 +43,7 @@ export function SharedWorkspace({ view = "admin" }: { view?: "admin" | "studio" 
   const [loadError, setLoadError] = useState(""), [conflict, setConflict] = useState(false), [busy, setBusy] = useState(false), [notice, setNotice] = useState("");
   const [backup, setBackup] = useState<BackupReview | null>(null), [backupError, setBackupError] = useState(""), [hasBrowserSetup, setHasBrowserSetup] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null), writeBusy = useRef(false), mounted = useRef(true);
+  const optionsRef = useRef<HTMLDetailsElement>(null);
   const spreadsheetReview = useRef<{ plan: SpreadsheetImportPlan; baseline: LocalAdminStore; candidate?: LocalAdminStore } | null>(null);
   const pendingKeys = useRef(new Map<string, string>());
   const spreadsheetAttempt = useRef(0);
@@ -70,6 +71,18 @@ export function SharedWorkspace({ view = "admin" }: { view?: "admin" | "studio" 
     }).catch(error => { if (mounted.current) { handleError(error); setLoadError(errorText(error)); } }).finally(() => { if (mounted.current) setLoading(false); });
     return () => { mounted.current = false; };
   }, [handleError, loadStore]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 7000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => { const menu = optionsRef.current; if (menu?.open && !menu.contains(event.target as Node)) menu.open = false; };
+    const escape = (event: KeyboardEvent) => { const menu = optionsRef.current; if (event.key === "Escape" && menu?.open) { event.preventDefault(); menu.open = false; menu.querySelector("summary")?.focus(); } };
+    document.addEventListener("pointerdown", outside); document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+  }, []);
+  const closeOptions = () => { const menu = optionsRef.current; if (menu) { menu.open = false; menu.querySelector("summary")?.focus(); } };
 
   const save = async (command: LocalAdminCommand) => {
     const current = storeRef.current;
@@ -102,7 +115,7 @@ export function SharedWorkspace({ view = "admin" }: { view?: "admin" | "studio" 
   };
   const unlock = async (passcode: string) => {
     await request("/api/shared/session", { method: "POST", body: JSON.stringify({ passcode }) });
-    await loadStore(); setLocked(false); setNotice("Workspace open. Your saved records are up to date.");
+    await loadStore(); setLocked(false); setNotice("");
   };
   const signOut = async () => {
     if (writeBusy.current) return;
@@ -165,18 +178,23 @@ export function SharedWorkspace({ view = "admin" }: { view?: "admin" | "studio" 
   };
   const refreshVisible = async () => { try { await loadStore(); setNotice("Latest shared records loaded. Your open draft is still here for review."); } catch (error) { setLoadError(errorText(error)); } };
 
-  const controls = <section className="admin-local-bar shared-controls" aria-label="Shared workspace controls">
-    <div className="admin-local-label"><Cloud size={21} /><div><strong>One shared workspace <span aria-hidden="true">·</span> Revision {store?.revision}</strong><p>Clients, people, and team plans stay together across browsers.</p></div></div>
-    <AdminSpreadsheetImport storageMode="shared" disabled={!store || busy || locked} onPreview={previewSpreadsheet} onApply={applySpreadsheet} onDiscard={() => { spreadsheetAttempt.current++; spreadsheetReview.current = null; }} />
-    <div className="admin-local-actions admin-local-backups"><span>Backup</span><button className="admin-button admin-secondary" onClick={exportBackup} disabled={!store || busy}><Download size={15} /> Export setup</button><button className="admin-button admin-secondary" onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={15} /> Restore backup</button><button className="admin-text-button" onClick={() => void signOut()} disabled={busy}><LogOut size={15} /> Lock workspace</button><input ref={fileRef} className="admin-local-file" type="file" accept="application/json,.json" aria-label="Choose a BOOKENDS backup" onChange={event => void chooseBackup(event)} /></div>
-    {hasBrowserSetup && <div className="shared-migration"><span>Your earlier browser setup is still here.</span><button className="admin-text-button" onClick={reviewBrowserSetup} disabled={busy}>Review for sharing <ArrowRight size={15} /></button></div>}
-    {conflict && <p className="admin-local-warning" role="status"><AlertCircle size={15} /> The saved workspace may have changed. Refresh before retrying; your open draft stays in place. <button className="admin-text-button" onClick={() => void refreshVisible()} disabled={busy}>Refresh shared records</button></p>}
-    {loadError && <p className="admin-error" role="alert">{loadError}</p>}{backupError && !backup && <p className="admin-error" role="alert">{backupError}</p>}{notice && <p className="admin-local-notice" role="status"><Check size={14} />{notice}</p>}
+  const controls = <section className="shared-controls" aria-label="Shared workspace controls">
+    <div className="shared-toolbar">
+      <div className="shared-toolbar-status" title={`Shared workspace · revision ${store?.revision}`}><Cloud size={17}/><span>Shared<span className="shared-status-detail"> workspace</span></span>{busy && <small role="status">Saving…</small>}</div>
+      <div className="shared-toolbar-actions"><AdminSpreadsheetImport compact storageMode="shared" disabled={!store || busy || locked} onPreview={previewSpreadsheet} onApply={applySpreadsheet} onDiscard={() => { spreadsheetAttempt.current++; spreadsheetReview.current = null; }} />
+        <details ref={optionsRef} className="shared-options"><summary aria-label="Workspace options" title="Workspace options"><MoreHorizontal size={20}/></summary><div className="shared-options-panel"><p>Shared workspace <span>Revision {store?.revision}</span></p><button onClick={() => { closeOptions(); exportBackup(); }} disabled={!store || busy}><Download size={16}/> Export setup</button><button onClick={() => { closeOptions(); fileRef.current?.click(); }} disabled={busy}><Upload size={16}/> Restore backup</button><button onClick={() => { closeOptions(); void refreshVisible(); }} disabled={busy}><RefreshCw size={16}/> Refresh shared records</button>{hasBrowserSetup && <button onClick={() => { closeOptions(); reviewBrowserSetup(); }} disabled={busy}><ArrowRight size={16}/> Review earlier browser setup</button>}<button className="shared-options-lock" onClick={() => { closeOptions(); void signOut(); }} disabled={busy}><LogOut size={16}/> Lock workspace</button></div></details>
+      </div>
+    </div>
+    <input ref={fileRef} className="admin-local-file" type="file" accept="application/json,.json" aria-label="Choose a BOOKENDS backup" onChange={event => void chooseBackup(event)} />
+    {hasBrowserSetup && <div className="shared-toolbar-message shared-migration"><span>Your earlier browser setup is still here.</span><button className="admin-text-button" onClick={reviewBrowserSetup} disabled={busy}>Review for sharing <ArrowRight size={15} /></button></div>}
+    {conflict && <div className="shared-toolbar-message shared-conflict" role="status"><AlertCircle size={16}/><span>The workspace changed. Your draft is still here.</span><button onClick={() => void refreshVisible()} disabled={busy}>Refresh shared records <RefreshCw size={13}/></button></div>}
+    {loadError && <p className="shared-toolbar-message admin-error" role="alert">{loadError}</p>}{backupError && !backup && <p className="shared-toolbar-message admin-error" role="alert">{backupError}</p>}
   </section>;
 
   return <>
     {store ? <div className={locked ? "shared-preserved-draft" : undefined} inert={locked} aria-hidden={locked || undefined}>
-      {view === "studio" ? <><details className="shared-studio-controls"><summary><Cloud size={14} /> Shared workspace · revision {store.revision}</summary>{controls}</details><TeamStudio data={store.data} save={save} refresh={loadStore} onSignOut={() => void signOut()} /></> : <AdminWorkspace initialData={store.data} localTransport={{ save, refresh: loadStore }} localControls={controls} storageMode="shared" />}
+      {view === "studio" ? <>{controls}<TeamStudio data={store.data} save={save} refresh={loadStore} onSignOut={() => void signOut()} /></> : <AdminWorkspace initialData={store.data} localTransport={{ save, refresh: loadStore }} localControls={controls} storageMode="shared" />}
+      {notice && <div className="shared-toast" role="status"><Check size={17}/><span>{notice}</span><button aria-label="Dismiss notification" onClick={() => setNotice("")}><X size={16}/></button></div>}
       {backup && <SharedBackupDialog review={backup} current={store} busy={busy} error={backupError} onClose={() => { if (!busy) { setBackup(null); setBackupError(""); } }} onRestore={() => void restoreBackup()} />}
     </div> : !locked ? <main className="shared-gate"><a className="shared-wordmark" href="/">[·] BOOKENDS</a><div className="shared-gate-card"><Cloud size={30} /><h1>{loading ? "Opening your workspace." : "Let’s reconnect."}</h1><p role={loadError ? "alert" : "status"}>{loadError || "Bringing your people and possibilities together…"}</p>{!loading && <button className="admin-button admin-primary" onClick={() => void refreshVisible()}><RefreshCw size={16} /> Try again</button>}</div></main> : null}
     {locked && <UnlockWorkspace configured={configured} preserved={!!store} onUnlock={unlock} />}
