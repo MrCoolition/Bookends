@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { AlertCircle, ArrowRight, Check, Cloud, Download, LockKeyhole, LogOut, MoreHorizontal, RefreshCw, Upload, X } from "lucide-react";
+import { AlertCircle, ArrowRight, ArrowUpRight, Check, Cloud, Download, Eye, EyeOff, LockKeyhole, LogOut, MoreHorizontal, RefreshCw, Upload, X } from "lucide-react";
 import type { AdminBootstrap } from "@/lib/admin/contracts";
 import { MAX_LOCAL_ADMIN_BYTES, parseLocalAdminStore, type LocalAdminCommand, type LocalAdminStore } from "@/lib/admin/local";
 import { STARTING_CLIENTS } from "@/lib/admin/client-seed";
@@ -202,17 +202,66 @@ export function SharedWorkspace({ view = "admin" }: { view?: "admin" | "studio" 
 }
 
 function UnlockWorkspace({ configured, preserved, onUnlock }: { configured: boolean; preserved: boolean; onUnlock: (passcode: string) => Promise<void> }) {
-  const [passcode, setPasscode] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
+  const [passcode, setPasscode] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false), [showPasscode, setShowPasscode] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null), inputRef = useRef<HTMLInputElement>(null), submitting = useRef(false);
   useEffect(() => { const dialog = dialogRef.current; if (preserved) dialog?.showModal(); inputRef.current?.focus(); return () => dialog?.close(); }, [preserved]);
   const submit = async (event: FormEvent) => {
-    event.preventDefault(); if (submitting.current || !configured || !passcode) return;
+    event.preventDefault();
+    const enteredPasscode = inputRef.current?.value ?? passcode;
+    if (submitting.current || !configured || !enteredPasscode) return;
     submitting.current = true; setBusy(true); setError("");
-    try { await onUnlock(passcode); setPasscode(""); } catch (caught) { setError(errorText(caught)); }
+    try { await onUnlock(enteredPasscode); setPasscode(""); } catch (caught) { setError(errorText(caught)); }
     finally { submitting.current = false; setBusy(false); }
   };
-  const content = <div className="shared-gate-card"><div className="shared-gate-kicker"><LockKeyhole size={16} /> YOUR PEOPLE. YOUR POSSIBILITIES.</div><h1 id="shared-unlock-title">Great teams<br /><em>start here.</em></h1><p>{!configured ? "The shared workspace needs its connection settings before it can open." : preserved ? "Your session ended. Unlock to continue with your draft right where you left it." : "Unlock your shared workspace to build what’s next."}</p>{configured && <form onSubmit={event => void submit(event)}><label htmlFor="workspace-passcode">Workspace passcode</label><input id="workspace-passcode" ref={inputRef} type="password" value={passcode} onChange={event => setPasscode(event.target.value)} required maxLength={256} autoComplete="current-password" disabled={busy} />{error && <p className="admin-error" role="alert">{error}</p>}<button className="admin-button admin-primary" disabled={busy || !passcode}>{busy ? "Opening…" : "Enter workspace"}<ArrowRight size={18} /></button></form>}<span className="shared-gate-footer"><Cloud size={15} /> One place for your clients, people, and team plans.</span></div>;
-  return preserved ? <dialog ref={dialogRef} className="shared-unlock-dialog" aria-labelledby="shared-unlock-title" onCancel={event => event.preventDefault()}>{content}</dialog> : <main className="shared-gate"><a className="shared-wordmark" href="/">[·] BOOKENDS</a>{content}<div className="shared-gate-orbit" aria-hidden="true"><span>01 / THE WORK</span><span>02 / THE PEOPLE</span><span>03 / WHAT’S NEXT</span></div></main>;
+  const CardHeading = preserved ? "h1" : "h2";
+  const content = <div className="shared-gate-card">
+    <div className="shared-gate-kicker"><LockKeyhole size={14} /> YOUR SHARED WORKSPACE</div>
+    <CardHeading id="shared-unlock-title">Let’s get to it.</CardHeading>
+    <p>{!configured ? "The shared workspace needs its connection settings before it can open." : preserved ? "Your session ended. Unlock to continue with your draft right where you left it." : "Good people. Great work. A little room for what’s next."}</p>
+    {configured && <form onSubmit={event => void submit(event)} aria-busy={busy}>
+      <label htmlFor="workspace-passcode">Workspace passcode</label>
+      <div className="shared-passcode-field"><input id="workspace-passcode" name="passcode" ref={inputRef} type={showPasscode ? "text" : "password"} value={passcode} onChange={event => setPasscode(event.target.value)} required maxLength={256} autoComplete="current-password" disabled={busy} aria-invalid={!!error} aria-describedby={error ? "shared-passcode-error" : undefined} /><button type="button" className="shared-passcode-toggle" onClick={() => { setPasscode(inputRef.current?.value ?? passcode); setShowPasscode(value => !value); }} aria-label={showPasscode ? "Hide passcode" : "Show passcode"} aria-pressed={showPasscode} disabled={busy}>{showPasscode ? <EyeOff size={18}/> : <Eye size={18}/>}</button></div>
+      {error && <p id="shared-passcode-error" className="admin-error" role="alert">{error}</p>}
+      <button type="submit" className="admin-button admin-primary" disabled={busy}>{busy ? "Opening…" : "Enter workspace"}<ArrowRight size={19} /></button>
+    </form>}
+    <span className="shared-gate-footer"><Cloud size={15} /> Your people & plans. Together.</span>
+  </div>;
+  return preserved ? <dialog ref={dialogRef} className="shared-unlock-dialog" aria-labelledby="shared-unlock-title" onCancel={event => event.preventDefault()}>{content}</dialog> : <main className="shared-gate shared-gate-entry">
+    <header className="shared-gate-header"><a className="shared-wordmark" href="/" aria-label="BOOKENDS home"><span aria-hidden="true">[<i/>]</span> BOOKENDS</a><span>EVERY ENDING. A NEW BEGINNING.</span></header>
+    <div className="shared-gate-layout">
+      <section className="shared-gate-intro" aria-labelledby="shared-intro-title"><p className="shared-gate-eyebrow"><span/> MADE FOR WHAT’S NEXT</p><h1 id="shared-intro-title">The next chapter<br/><em>starts with you.</em></h1>
+        <div className="shared-gate-art" aria-hidden="true">
+          <svg className="shared-gate-sculpture" viewBox="0 0 660 330" fill="none">
+            <path d="M20 291H626M80 291L234 201M252 291L406 201M424 291L578 201" stroke="#D8D6CF"/>
+            <path d="M104 286L173 250H354L284 286Z" fill="#15264C" fillOpacity=".07"/>
+            <path d="M356 276L425 240H574L505 276Z" fill="#15264C" fillOpacity=".07"/>
+            <g className="shared-bracket-left">
+              <path d="M103 55L132 33H286L257 55Z" fill="#7D94FF"/>
+              <path d="M257 55L286 33V79L257 101Z" fill="#253DBC"/>
+              <path d="M153 101L182 79V211L153 233Z" fill="#20399F"/>
+              <path d="M153 233L182 211H286L257 233Z" fill="#7D94FF"/>
+              <path d="M257 233L286 211V257L257 279Z" fill="#20399F"/>
+              <path d="M103 55H257V101H153V233H257V279H103Z" fill="#365BFA"/>
+              <path d="M104 56H256M104 56V278" stroke="#9AAEFF"/>
+            </g>
+            <g className="shared-bracket-right">
+              <path d="M369 40L397 18H551L523 40Z" fill="#FFC3AF"/>
+              <path d="M523 40L551 18V242L523 264Z" fill="#C94F31"/>
+              <path d="M369 86L397 64H473V86Z" fill="#C94F31"/>
+              <path d="M369 218L397 196H473V218Z" fill="#FFC3AF"/>
+              <path d="M369 40H523V264H369V218H473V86H369Z" fill="#F47F60"/>
+              <path d="M370 41H522M522 41V263" stroke="#FFBEA8"/>
+            </g>
+            <path className="shared-gate-art-arrow" d="M283 189L377 95M300 95H377V172" stroke="#17243F" strokeWidth="9" strokeLinecap="square" strokeLinejoin="miter"/>
+            <circle cx="589" cy="85" r="3" fill="#365BFA"/><path d="M578 85H600M589 74V96" stroke="#365BFA"/>
+          </svg>
+          <div className="shared-gate-art-caption"><span>ROOM FOR<br/>POSSIBILITY.</span><span>THE WORK <i/> THE PEOPLE <i/> WHAT’S NEXT</span></div>
+        </div>
+      </section>
+      <div className="shared-gate-access"><span className="shared-gate-access-tab">YOUR NEXT MOVE <ArrowUpRight size={15}/></span>{content}</div>
+    </div>
+    <footer className="shared-gate-bottom"><span>Built around people. Ready for possibility.</span><span>LET’S MAKE GOOD THINGS HAPPEN <ArrowUpRight size={15}/></span></footer>
+  </main>;
 }
 
 function SharedBackupDialog({ review, current, busy, error, onClose, onRestore }: { review: BackupReview; current: LocalAdminStore; busy: boolean; error: string; onClose: () => void; onRestore: () => void }) {

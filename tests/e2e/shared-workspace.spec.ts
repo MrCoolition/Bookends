@@ -52,7 +52,7 @@ async function unlock(page: Page) {
 test("shared administration reveals no client data before unlock and supports lock", async ({ page }) => {
   const state = await mockWorkspace(page, false);
   await page.goto("/admin");
-  await expect(page.getByRole("heading", { name: "Great teams start here." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "The next chapter starts with you." })).toBeVisible();
   await expect(page.getByText("Shared Test Client", { exact: true })).toHaveCount(0);
   await page.getByLabel("Workspace passcode", { exact: true }).fill("wrong-passcode");
   await page.getByRole("button", { name: "Enter workspace", exact: true }).click();
@@ -68,13 +68,67 @@ test("shared administration reveals no client data before unlock and supports lo
   await expect(page.getByText("Shared Test Client", { exact: true })).toHaveCount(0);
 });
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 740 }]) {
+  test(`unlock entrance fits ${viewport.width}px and supports keyboard entry with reduced motion`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.setViewportSize(viewport);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const state = await mockWorkspace(page, false);
+    await page.goto("/admin?section=clients");
+    const passcode = page.getByLabel("Workspace passcode", { exact: true });
+    const enter = page.getByRole("button", { name: "Enter workspace", exact: true });
+    await expect(passcode).toBeFocused();
+    await expect(enter).toBeInViewport({ ratio: 1 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    await expect(page.getByText("Shared Test Client", { exact: true })).toHaveCount(0);
+    await expect.poll(() => page.locator(".shared-gate").evaluate(element => element.getAnimations({ subtree: true }).filter(animation => animation.playState === "running").length)).toBe(0);
+    await page.screenshot({ path: `artifacts/unlock-redesign-${viewport.width}.png`, fullPage: true });
+    await passcode.fill("synthetic-workspace-passcode");
+    await page.keyboard.press("Tab");
+    const show = page.getByRole("button", { name: "Show passcode", exact: true });
+    await expect(show).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(passcode).toHaveAttribute("type", "text");
+    await expect(page.getByRole("button", { name: "Hide passcode", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(passcode).toHaveAttribute("type", "password");
+    await expect(passcode).toHaveValue("synthetic-workspace-passcode");
+    await page.keyboard.press("Tab");
+    await expect(enter).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("button", { name: /Shared Test Client/ })).toBeVisible();
+    expect(state.writes).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+}
+
+for (const toggleVisibility of [false, true]) {
+  test(`unlock accepts a passcode supplied by browser autofill${toggleVisibility ? " after toggling its visibility" : " without an input event"}`, async ({ page }) => {
+    const state = await mockWorkspace(page, false);
+    await page.goto("/admin");
+    const passcode = page.getByLabel("Workspace passcode", { exact: true });
+    await expect(passcode).toBeFocused();
+    await passcode.evaluate((input: HTMLInputElement) => { input.value = "synthetic-workspace-passcode"; });
+    if (toggleVisibility) {
+      await page.getByRole("button", { name: "Show passcode", exact: true }).click();
+      await expect(passcode).toHaveValue("synthetic-workspace-passcode");
+      await page.getByRole("button", { name: "Hide passcode", exact: true }).click();
+      await expect(passcode).toHaveValue("synthetic-workspace-passcode");
+    }
+    await page.getByRole("button", { name: "Enter workspace", exact: true }).click();
+    await expect(page.getByRole("button", { name: /Shared Test Client/ })).toBeVisible();
+    expect(state.writes).toEqual([]);
+  });
+}
+
 test("session expiration preserves a client draft through re-unlock", async ({ page }) => {
   const state = await mockWorkspace(page);
   await page.goto("/admin");
   const editor = await openClient(page);
   state.authenticated = false;
   await editor.getByRole("button", { name: "Add client", exact: true }).click();
-  const gate = page.getByRole("dialog", { name: "Great teams start here." });
+  const gate = page.getByRole("dialog", { name: "Let’s get to it." });
   await expect(gate).toBeVisible();
   await unlock(page);
   await expect(gate).toHaveCount(0);
@@ -257,7 +311,7 @@ test("an unsaved team and review survive session expiry", async ({ page }) => {
   const review = page.getByRole("dialog", { name: "Customer platform build", exact: true });
   state.authenticated = false;
   await review.getByRole("button", { name: "Save team plan", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Great teams start here." })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Let’s get to it." })).toBeVisible();
   await unlock(page);
   await expect(review).toBeVisible();
   await expect(review).toContainText("Alex Rivers");
