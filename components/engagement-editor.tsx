@@ -56,7 +56,7 @@ export function EngagementEditor({ record, data, save, close }: { record?: Admin
   const heading = useRef<HTMLHeadingElement>(null);
   const form = useRef<HTMLFormElement>(null);
   const id = useId();
-  const plan: EngagementPlan = { version: 1, sowReference: reference.trim(), status, signedOn: signedOn || null, start, end, outcomes: outcomes.trim(), roles: roles.map(toRole) };
+  const plan: EngagementPlan = { ...existing, version: 1, sowReference: reference.trim(), status, signedOn: signedOn || null, start, end, outcomes: outcomes.trim(), roles: roles.map(toRole) };
   const parsed = engagementPlanSchema.safeParse(plan);
   const listErrorRole = roles.find(role => parseNamedList(role.skillsText).error);
   const summary = parsed.success ? summarizeEngagement(parsed.data) : null;
@@ -72,7 +72,7 @@ export function EngagementEditor({ record, data, save, close }: { record?: Admin
     if (!data.clients.some(client => client.id === clientId && client.active)) return "Choose an active client for this engagement.";
     const windowError = engagementWindowError(start, end);
     if (windowError) return windowError;
-    if (status !== "draft" && (!reference.trim() || !isEngagementDate(signedOn))) return "A signed or completed SOW needs its reference and a valid signing date.";
+    if (existing?.source !== "direct" && status !== "draft" && (!reference.trim() || !isEngagementDate(signedOn))) return "A signed or completed SOW needs its reference and a valid signing date.";
     return "";
   }
   function next(nextStep: 2 | 3) {

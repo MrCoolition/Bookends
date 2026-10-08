@@ -7,7 +7,8 @@ import { OperationsError } from "@/lib/operations/service";
 import { loadAdmin } from "@/lib/admin/service";
 import { AdminWorkspace } from "@/components/admin-workspace";
 import { LocalAdminWorkspace } from "@/components/local-admin-workspace";
-import { localAdministrationEnabled } from "@/lib/admin/mode";
+import { SharedWorkspace } from "@/components/shared-workspace";
+import { localAdministrationEnabled, sharedAdministrationEnabled } from "@/lib/admin/mode";
 import { signIn, signOut, CORPORATE_PROVIDER_ID } from "@/auth";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ const SECTIONS = [
 ];
 
 export default async function AdminPage() {
+  if (sharedAdministrationEnabled()) return <SharedWorkspace view="admin" />;
   if (localAdministrationEnabled()) return <LocalAdminWorkspace />;
   const authConfigured = getAuthConfigurationStatus().configured;
   const dbConfigured = databaseConfigured();

@@ -5,6 +5,7 @@ import type { JourneyActor, JourneyRole, JourneyTemplate, PermissionScope } from
 import type { AdminBootstrap, AdminCommand, AdminGrant, AdminMember, AdminPlaybook } from "./contracts";
 import { adminRequestSchema } from "./validation";
 import { capabilityAliasesAfterRename, capabilityNameKey, capabilitySchema, engagementPlanSchema, profileSchema } from "./engagement";
+import { plannedTeamReferenceIssues } from "../studio/team";
 
 /** Browser-local configuration only. These records never establish an authenticated identity or permission. */
 export type LocalAdminStore = { version: 1; revision: number; clientSeedVersion?: 1; data: AdminBootstrap };
@@ -111,6 +112,12 @@ function validateLinks(data: AdminBootstrap) {
   for (const mission of data.missions) {
     const client = data.clients.find(client => client.id === mission.clientId);
     ensure(client && (!mission.active || client.active), "invalid_reference", "Every active mission needs an active client.");
+    if (mission.engagement) {
+      // A backup may retain an archived teammate's history, but cannot reference
+      // a teammate that does not exist in the restored workspace.
+      const issue = plannedTeamReferenceIssues(mission.engagement, data.resources, mission.engagement)[0];
+      ensure(!issue, "invalid_reference", issue?.message ?? "A proposed teammate is missing.");
+    }
   }
   for (const member of data.members) {
     ensure(!member.resourceId || data.resources.some(resource => resource.id === member.resourceId), "invalid_reference", "A local teammate link is missing.");
@@ -209,6 +216,10 @@ export function applyLocalAdminCommand(input: LocalAdminStore, raw: LocalAdminCo
       activeClient(data, command.clientId);
       const record = command.id ? current(data.missions, command.id, command.expectedRevision) : null;
       const engagement = command.engagement ?? record?.engagement;
+      if (engagement) {
+        const issue = plannedTeamReferenceIssues(engagement, data.resources, record?.engagement)[0];
+        ensure(!issue, issue?.code ?? "invalid_reference", issue?.message ?? "Review the proposed team.");
+      }
       const value = { id: record?.id ?? crypto.randomUUID(), name: command.name, clientId: command.clientId, active: record?.active ?? true, revision: (record?.revision ?? 0) + 1, ...(engagement ? { engagement } : {}) };
       if (record) Object.assign(record, value); else data.missions.push(value); break;
     }

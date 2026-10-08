@@ -46,14 +46,26 @@ export const engagementRoleSchema = z.object({
   allocationPercent: z.number().finite().min(1).max(100),
   skills: z.array(text(100)).max(40).refine(values => new Set(values.map(value => value.toLocaleLowerCase("en-US"))).size === values.length, "List each skill once for this role."),
   responsibilities: text(3000, false), start: date, end: date,
+  /** A proposed team only. These choices do not create staffing assignments. */
+  selectedResourceIds: z.array(z.uuid()).max(1000).optional(),
 }).strict().superRefine((role, ctx) => {
   if (isEngagementDate(role.start) && isEngagementDate(role.end) && role.end < role.start) ctx.addIssue({ code: "custom", path: ["end"], message: "The role's last day must be on or after its first day." });
+  const selected = role.selectedResourceIds ?? [];
+  if (new Set(selected.map(id => id.toLowerCase())).size !== selected.length) ctx.addIssue({ code: "custom", path: ["selectedResourceIds"], message: "Choose each teammate once within a role." });
+  if (selected.length > role.headcount) ctx.addIssue({ code: "custom", path: ["selectedResourceIds"], message: "The proposed team cannot exceed this role's headcount. Add a position before choosing another teammate." });
 });
 export type EngagementRole = z.infer<typeof engagementRoleSchema>;
 
 export const engagementPlanSchema = z.object({
   version: z.literal(1), sowReference: text(200, false), status: z.enum(["draft", "signed", "complete"]),
   signedOn: date.nullable(), start: date, end: date, outcomes: text(4000, false),
+  /** Omission preserves the original SOW-backed interpretation of existing plans. */
+  source: z.enum(["direct", "sow"]).optional(),
+  intake: z.object({
+    sourceName: text(255), sourceKind: z.enum(["pdf", "docx", "text"]),
+    evidence: z.array(z.object({ field: text(120), quote: text(600), verified: z.boolean() }).strict()).max(220),
+    uncertainties: z.array(text(500)).max(40),
+  }).strict().optional(),
   roles: z.array(engagementRoleSchema).min(1, "Add at least one delivery role to the team.").max(100),
 }).strict().superRefine((plan, ctx) => {
   if (isEngagementDate(plan.start) && isEngagementDate(plan.end)) {
@@ -64,7 +76,8 @@ export const engagementPlanSchema = z.object({
       if (isEngagementDate(role.end) && role.end > plan.end) ctx.addIssue({ code: "custom", path: ["roles", index, "end"], message: "This role must end within the engagement's dates." });
     });
   }
-  if (plan.status !== "draft") {
+  if (plan.source === "direct" && plan.status === "signed") ctx.addIssue({ code: "custom", path: ["status"], message: "A direct team plan can be draft or complete. Use an SOW plan to record a signed agreement." });
+  if (plan.source !== "direct" && plan.status !== "draft") {
     if (!plan.sowReference) ctx.addIssue({ code: "custom", path: ["sowReference"], message: "Add the signed SOW reference." });
     if (!plan.signedOn) ctx.addIssue({ code: "custom", path: ["signedOn"], message: "Add the SOW signature date." });
   }

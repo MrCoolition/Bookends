@@ -59,7 +59,7 @@ test("every business table forces RLS and runtime owns no tables or bypass privi
   const roles = await database.query<{ rolsuper: boolean; rolbypassrls: boolean; rolcanlogin: boolean; rolcreatedb: boolean; rolcreaterole: boolean }>("SELECT rolsuper,rolbypassrls,rolcanlogin,rolcreatedb,rolcreaterole FROM pg_roles WHERE rolname='be_runtime'");
   assert.deepEqual(roles.rows[0], { rolsuper: false, rolbypassrls: false, rolcanlogin: false, rolcreatedb: false, rolcreaterole: false });
   const tables = await database.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean; owner: string }>("SELECT relrowsecurity,relforcerowsecurity,pg_get_userbyid(relowner) AS owner FROM pg_class WHERE relkind='r' AND relname LIKE 'be_%' AND relname <> 'be_schema_migrations'");
-  assert.equal(tables.rows.length, 15);
+  assert.equal(tables.rows.length, 18);
   assert.ok(tables.rows.every(table => table.relrowsecurity && table.relforcerowsecurity && table.owner !== "be_runtime"));
   await assert.rejects(runtime(orgA, tx => tx.query("SELECT * FROM be_schema_migrations")), code("42501"));
 });
@@ -87,6 +87,7 @@ test("verified identity can find only its membership before organization authori
 test("runtime safety check rejects table owners and logins with extra membership privileges", async () => {
   assert.equal((await database.query<{ unsafe: boolean }>(runtimeRoleSafetySql)).rows[0].unsafe, true);
   assert.equal((await runtime(orgA, tx => tx.query<{ unsafe: boolean }>(runtimeRoleSafetySql))).rows[0].unsafe, false);
+  assert.equal((await database.query<{ unsafe: boolean }>(runtimeRoleSafetySql.replaceAll("current_user", "$1::name"), ["be_runtime"])).rows[0].unsafe, false, "Activation can inspect a new runtime login without SET ROLE privileges");
   await database.exec("CREATE ROLE unsafe_application INHERIT; GRANT be_runtime TO unsafe_application; GRANT UPDATE(grants) ON be_memberships TO unsafe_application");
   await database.transaction(async tx => {
     await tx.exec("SET LOCAL ROLE unsafe_application");

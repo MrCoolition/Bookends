@@ -4,7 +4,8 @@ import { JOURNEY_TEMPLATE_CATALOG } from "../journeys/templates";
 import type { JourneyTemplate, PermissionScope } from "../journeys/types";
 import { actorFor, OperationsError, type Membership, type OperationsQuery } from "../operations/service";
 import type { AdminBootstrap, AdminCapability, AdminCommand, AdminGrant, AdminMember, AdminRequest } from "./contracts";
-import { capabilityAliasesAfterRename, capabilitySchema, engagementPlanSchema, profileSchema } from "./engagement";
+import { capabilityAliasesAfterRename, capabilitySchema, engagementPlanSchema, profileSchema, type EngagementPlan } from "./engagement";
+import { plannedTeamReferenceIssues } from "../studio/team";
 
 function requireAdmin(member: Membership) {
   if (!member.active || member.role !== "administrator" || member.home_scope !== null) throw new OperationsError("forbidden", "An active organization administrator is required.", 403);
@@ -29,6 +30,16 @@ async function validOwner(db: OperationsQuery, org: string, ownerId: string, hom
   const member = (await db.query<Membership>("SELECT * FROM be_memberships WHERE organization_id=$1 AND id=$2 AND active", [org, ownerId])).rows[0];
   const scope: PermissionScope = { organizationId: org, homeId: home, resourceId };
   if (!member || !actorFor(member).grants.some(grant => ["administrator", "placement_owner", "home_leader", "mission_owner"].includes(grant.role) && Object.entries(grant.scope).every(([key, value]) => value === undefined || scope[key as keyof PermissionScope] === value))) throw new OperationsError("invalid_owner_scope", "Choose an active staffing owner authorized for this HOME.");
+}
+async function validatePlannedTeam(db: OperationsQuery, org: string, plan?: EngagementPlan, previous?: EngagementPlan) {
+  if (!plan) return;
+  const ids = [...new Set(plan.roles.flatMap(role => role.selectedResourceIds ?? []))];
+  if (!ids.length) return;
+  // Lock all referenced people until the write commits so a new selection cannot
+  // race an archive. Organization ownership is checked even for retained history.
+  const resources = (await db.query<{ id: string; active: boolean }>("SELECT id,active FROM be_resources WHERE organization_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR SHARE", [org, ids])).rows;
+  const issue = plannedTeamReferenceIssues(plan, resources, previous)[0];
+  if (issue) throw new OperationsError(issue.code, issue.message);
 }
 function grantsForStorage(grants: AdminGrant[], org: string) { return grants.map(grant => ({ role: grant.role, scope: { ...grant.scope, organizationId: org } })); }
 function safeGrants(value: Membership["grants"], org: string): AdminGrant[] {
@@ -112,9 +123,14 @@ async function applyAdmin(db: OperationsQuery, member: Membership, command: Admi
       if (command.id) {
         const current = await lock(db, org, "be_missions", id); revision(Number(current.revision), command.expectedRevision);
         if (current.client_id !== command.clientId && (await db.query("SELECT 1 FROM be_assignment_references WHERE organization_id=$1 AND mission_id=$2 UNION ALL SELECT 1 FROM be_journeys WHERE organization_id=$1 AND mission_id=$2 LIMIT 1", [org, id])).rows.length) throw new OperationsError("historical_scope", "This mission has assignment or journey history. Create a new mission for a different client.");
-        const engagement = command.engagement ?? current.engagement;
+        const previous = current.engagement ? engagementPlanSchema.parse(current.engagement) : undefined;
+        const engagement = command.engagement ?? previous;
+        await validatePlannedTeam(db, org, engagement, previous);
         await db.query("UPDATE be_missions SET name=$3,client_id=$4,client_name=$5,engagement=$6,revision=revision+1 WHERE organization_id=$1 AND id=$2", [org, id, command.name, command.clientId, client.name, engagement ? JSON.stringify(engagement) : null]);
-      } else await db.query("INSERT INTO be_missions(organization_id,id,name,client_id,client_name,engagement) VALUES($1,$2,$3,$4,$5,$6)", [org, id, command.name, command.clientId, client.name, command.engagement ? JSON.stringify(command.engagement) : null]);
+      } else {
+        await validatePlannedTeam(db, org, command.engagement);
+        await db.query("INSERT INTO be_missions(organization_id,id,name,client_id,client_name,engagement) VALUES($1,$2,$3,$4,$5,$6)", [org, id, command.name, command.clientId, client.name, command.engagement ? JSON.stringify(command.engagement) : null]);
+      }
       await audit(db, member, command.type, { missionId: id }); return;
     }
     case "save_capability": {

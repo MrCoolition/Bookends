@@ -5,6 +5,9 @@ import "./planner.css";
 import "./experience.css";
 import "./admin.css";
 import "./engagements.css";
+import "./shared-workspace.css";
+import "./team-studio.css";
+import "./sow-intake.css";
 export const metadata: Metadata = {
   title: "BOOKENDS — Every ending. A new beginning.",
   description: "Your people. Their next mission. One extraordinary view. Explore the BOOKENDS resource alignment workspace.",

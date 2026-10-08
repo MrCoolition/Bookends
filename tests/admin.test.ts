@@ -266,3 +266,26 @@ test("shared role and skill catalogs preserve aliases with scoped revision-check
   await assert.rejects(f.transaction(f.admin, db => db.query("DELETE FROM be_capabilities WHERE id=$1", [item.id])), code("42501"));
   await assert.rejects(f.db.query("UPDATE be_capabilities SET kind='skill' WHERE id=$1", [item.id]), code("22023"));
 });
+
+test("proposed team choices persist without assignments, reject foreign or inactive additions and retain archived history", async t => {
+  const f = await fixture(); t.after(() => f.db.close());
+  const client = await f.client(), foreignId = randomUUID();
+  await f.db.query("INSERT INTO be_resources(organization_id,id,name,home,owner_id) VALUES($1,$2,'Foreign teammate','Data',$3)", [f.otherOrg, foreignId, f.foreign.id]);
+  const engagement: EngagementPlan = { version: 1, source: "direct", sowReference: "", signedOn: null, status: "draft", start: "2030-01-01", end: "2030-12-31", outcomes: "Known team", roles: [{ id: randomUUID(), name: "Data engineer", headcount: 1, allocationPercent: 75, skills: [], responsibilities: "Delivery", start: "2030-01-01", end: "2030-12-31", selectedResourceIds: [f.resourceId] }] };
+  const create: AdminCommand = { type: "save_mission", name: "Direct workstream", clientId: client.id, engagement };
+  for (const unknown of [randomUUID(), foreignId]) await assert.rejects(f.execute({ ...create, engagement: { ...engagement, roles: [{ ...engagement.roles[0], selectedResourceIds: [unknown] }] } }), code("missing_resource"));
+  await f.execute(create);
+  let mission = (await f.load()).missions[0];
+  assert.deepEqual(mission.engagement, engagement);
+  await f.execute({ type: "set_resource_active", id: f.resourceId, expectedRevision: 1, active: false });
+  await f.execute({ type: "save_mission", id: mission.id, expectedRevision: 1, name: "Retained plan", clientId: client.id });
+  mission = (await f.load()).missions[0];
+  assert.deepEqual(mission.engagement, engagement);
+  await f.execute({ type: "save_mission", id: mission.id, expectedRevision: mission.revision, name: mission.name, clientId: client.id, engagement: { ...engagement, outcomes: "Updated brief" } });
+  mission = (await f.load()).missions[0];
+  await assert.rejects(f.execute(create), code("inactive_resource"));
+  await assert.rejects(f.execute({ type: "save_mission", id: mission.id, expectedRevision: mission.revision, name: mission.name, clientId: client.id, engagement: { ...engagement, roles: [{ ...engagement.roles[0], id: randomUUID() }] } }), code("inactive_resource"));
+  assert.deepEqual((await f.load(f.foreign)).missions, []);
+  assert.equal((await f.operations()).journeys.length, 0);
+  assert.equal((await f.db.query<{ count: number }>("SELECT count(*)::int AS count FROM be_assignment_references")).rows[0].count, 0);
+});

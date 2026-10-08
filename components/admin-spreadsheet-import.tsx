@@ -6,6 +6,7 @@ import type { SpreadsheetImportPlan } from "@/lib/admin/spreadsheet";
 
 type Props = {
   disabled?: boolean;
+  storageMode?: "browser" | "shared";
   onPreview: (file: File) => Promise<SpreadsheetImportPlan>;
   onApply: (plan: SpreadsheetImportPlan) => Promise<void>;
   onDiscard: () => void;
@@ -14,7 +15,7 @@ const MAX_VISIBLE_ERRORS = 25;
 const MAX_VISIBLE_CHANGES = 40;
 function message(error: unknown) { return error instanceof Error && error.message.length < 500 ? error.message : "The workbook could not be processed. Use the BOOKENDS Excel template and try again."; }
 
-export function AdminSpreadsheetImport({ disabled = false, onPreview, onApply, onDiscard }: Props) {
+export function AdminSpreadsheetImport({ disabled = false, storageMode = "browser", onPreview, onApply, onDiscard }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const confirmFormId = useId();
   const [open, setOpen] = useState(false);
@@ -55,8 +56,8 @@ export function AdminSpreadsheetImport({ disabled = false, onPreview, onApply, o
         {error && <p className="admin-error" role="alert">{error}</p>}
         {!plan && <p className="admin-form-intro">Start with the BOOKENDS Excel template and keep its sheet names and column headers. Choose an .xlsx workbook up to 5 MB.</p>}
         <form id={confirmFormId} className="admin-form admin-excel-confirm" onSubmit={event => { event.preventDefault(); void apply(); }}>
-          {plan && !plan.errors.length && changes > 0 && <label className="admin-checkbox"><input type="checkbox" checked={confirmed} disabled={applying} onChange={event => setConfirmed(event.target.checked)} required /><span>I reviewed these additions and updates. Apply them to the setup saved in this browser.</span></label>}
-          <p className="admin-excel-local-note">Your workbook is processed in this browser. Nothing is uploaded or shared.</p>
+          {plan && !plan.errors.length && changes > 0 && <label className="admin-checkbox"><input type="checkbox" checked={confirmed} disabled={applying} onChange={event => setConfirmed(event.target.checked)} required /><span>{storageMode === "shared" ? "I reviewed these additions and updates. Apply them to the shared workspace." : "I reviewed these additions and updates. Apply them to the setup saved in this browser."}</span></label>}
+          <p className="admin-excel-local-note">{storageMode === "shared" ? "The workbook is read in this browser. Only the reviewed setup records are saved to the shared workspace when you apply." : "Your workbook is processed in this browser. Nothing is uploaded or shared."}</p>
           </form><div className="admin-form-footer admin-excel-footer"><button type="button" className="admin-button admin-secondary" disabled={applying} onClick={() => fileRef.current?.click()}><Upload size={15} /> Choose another file</button><button form={confirmFormId} type="submit" className="admin-button admin-primary" disabled={!plan || plan.errors.length > 0 || !confirmed || !changes || applying}>{applying ? "Applying import…" : "Apply import"}<ArrowRight size={15} /></button></div>
       </>}
     </SpreadsheetDialog>}
