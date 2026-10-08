@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyLocalAdminCommand, createLocalAdminStore, parseLocalAdminStore, LOCAL_ADMIN_OWNER_ID, MAX_LOCAL_ADMIN_BYTES, type LocalAdminCommand } from "../lib/admin/local";
+import { applyLocalAdminCommand, createLocalAdminStore, parseLocalAdminCommand, parseLocalAdminStore, LOCAL_ADMIN_OWNER_ID, MAX_LOCAL_ADMIN_BYTES, type LocalAdminCommand } from "../lib/admin/local";
 import type { AdminPlaybook } from "../lib/admin/contracts";
+import { adminRequestSchema } from "../lib/admin/validation";
 
 function code(expected: string) { return (error: unknown) => !!error && typeof error === "object" && "code" in error && error.code === expected; }
 function fixture() {
@@ -44,6 +45,64 @@ test("local business edits are immutable reductions with stable codes and optimi
   f.apply({type:"set_organization",expectedRevision:1,name:"My studio"});assert.equal(f.state.data.organization.name,"My studio");
   assert.throws(()=>f.apply({type:"save_resource",name:"Missing HOME",home:"Other",ownerId:LOCAL_ADMIN_OWNER_ID}),code("invalid_home"));
   assert.throws(()=>f.apply({type:"save_mission",name:"Missing client",clientId:crypto.randomUUID()}),code("invalid_client"));
+});
+
+test("planning people can remain ungrouped and unowned through edits and backup round trips", () => {
+  const original = createLocalAdminStore();
+  const profile = { roles: ["Engineer Lead"], skills: [] };
+  let state = applyLocalAdminCommand(original, { type: "save_resource", name: "Ungrouped teammate", home: "", ownerId: "", profile });
+  const person = state.data.resources[0];
+  assert.deepEqual(state.data.homes, []);
+  assert.equal(state.data.members.length, 1);
+  assert.equal(person.home, ""); assert.equal(person.ownerId, "");
+  assert.deepEqual(person.profile, profile);
+  assert.deepEqual(original.data.resources, []);
+  const edit: LocalAdminCommand = { type: "save_resource", id: person.id, expectedRevision: person.revision, name: "Updated teammate", home: "", ownerId: "" };
+  state = applyLocalAdminCommand(state, edit);
+  assert.equal(state.data.resources[0].revision, 2);
+  assert.deepEqual(state.data.resources[0].profile, profile);
+  assert.throws(() => applyLocalAdminCommand(state, edit), code("conflict"));
+  assert.deepEqual(parseLocalAdminStore(JSON.stringify(state)), state);
+  state = applyLocalAdminCommand(state, { type: "set_resource_active", id: person.id, expectedRevision: 2, active: false });
+  state = applyLocalAdminCommand(state, { type: "set_resource_active", id: person.id, expectedRevision: 3, active: true });
+  assert.equal(state.data.resources[0].active, true);
+});
+
+test("planning's optional references still reject missing or archived selections and retain edit identity checks", () => {
+  const f = fixture(), existing = f.state.data.resources[0];
+  f.apply({ type: "save_resource", id: existing.id, expectedRevision: 1, name: existing.name, home: "", ownerId: "" });
+  assert.equal(f.state.data.resources[0].home, ""); assert.equal(f.state.data.resources[0].ownerId, "");
+  const command = { type: "save_resource" as const, name: "Ungrouped teammate", home: "", ownerId: "" };
+  assert.throws(() => f.apply({ ...command, home: "missing" }), code("invalid_home"));
+  assert.throws(() => f.apply({ ...command, ownerId: crypto.randomUUID() }), code("invalid_owner"));
+  f.apply({ type: "set_home_active", id: f.state.data.homes[0].id, expectedRevision: 1, active: false });
+  assert.throws(() => f.apply({ ...command, home: "Data" }), code("invalid_home"));
+  f.apply({ type: "create_local_member", name: "Prior owner", role: "placement_owner", resourceId: null, homeScope: null, grants: [] });
+  const owner = f.state.data.members[1];
+  f.apply({ type: "update_member", id: owner.id, expectedRevision: 1, name: owner.name, role: owner.role, resourceId: null, homeScope: null, grants: [], active: false });
+  assert.throws(() => f.apply({ ...command, ownerId: owner.id }), code("invalid_owner"));
+  for (const patch of [{ home: "missing" }, { ownerId: crypto.randomUUID() }]) {
+    const broken = structuredClone(f.state); Object.assign(broken.data.resources[0], patch);
+    assert.throws(() => parseLocalAdminStore(broken), code("invalid_reference"));
+  }
+  for (const patch of [{ home: "Data" }, { ownerId: owner.id }]) {
+    const broken = structuredClone(f.state); Object.assign(broken.data.resources[0], patch);
+    assert.throws(() => parseLocalAdminStore(broken), code("active_dependents"));
+  }
+  assert.throws(() => parseLocalAdminCommand({ ...command, id: existing.id }));
+  assert.throws(() => parseLocalAdminCommand({ ...command, expectedRevision: 1 }));
+  assert.throws(() => parseLocalAdminCommand({ ...command, ownerId: "not-an-id" }));
+  assert.throws(() => parseLocalAdminCommand({ ...command, home: "\u0000" }));
+  assert.throws(() => parseLocalAdminCommand({ ...command, unexpected: true }));
+});
+
+test("operational person schema still requires HOME and owner independently of planning", () => {
+  const command = { type: "save_resource" as const, name: "Operational teammate", home: "Data", ownerId: LOCAL_ADMIN_OWNER_ID };
+  assert.equal(adminRequestSchema.safeParse({ idempotencyKey: LOCAL_ADMIN_OWNER_ID, command }).success, true);
+  for (const patch of [{ home: "" }, { ownerId: "" }, { home: "", ownerId: "" }]) {
+    assert.equal(adminRequestSchema.safeParse({ idempotencyKey: LOCAL_ADMIN_OWNER_ID, command: { ...command, ...patch } }).success, false);
+    assert.doesNotThrow(() => parseLocalAdminCommand({ ...command, ...patch }));
+  }
 });
 
 test("archive and reactivate retain references and require active business dependencies", () => {

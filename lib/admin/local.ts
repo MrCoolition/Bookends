@@ -33,6 +33,13 @@ const scope = z.object({ homeId: text(80).optional(), clientId: id.optional(), m
 const grants = z.array(z.object({ role, scope }).strict()).max(30);
 const memberFields = { name: text(160), role, resourceId: id.nullable(), homeScope: text(80).nullable(), grants };
 const localMemberCommand = z.object({ type: z.literal("create_local_member"), ...memberFields }).strict();
+const planningOwnerId = z.union([z.literal(""), id]);
+const localResourceCommand = z.object({
+  type: z.literal("save_resource"), id: id.optional(), expectedRevision: rev.optional(),
+  name: text(160), home: optionalText(80), ownerId: planningOwnerId, profile: profileSchema.optional(),
+}).strict().superRefine((command, ctx) => {
+  if (!!command.id !== !!command.expectedRevision) ctx.addIssue({ code: "custom", message: "Editing requires both an ID and its current revision.", path: ["expectedRevision"] });
+});
 const recordFields = { id, revision: rev, active: z.boolean() };
 const templateSchema = z.object({
   id: text(160), kind, version: rev, name: text(200), description: text(3000), status: z.enum(["draft", "approved", "retired"]), sourceReference: text(500),
@@ -46,7 +53,7 @@ const storeSchema = z.object({
     viewer: z.object({ id: z.literal(LOCAL_ADMIN_OWNER_ID), name: text(160) }).strict(),
     clients: z.array(z.object({ ...recordFields, name: text(160), code: text(80), contactName: optionalText(160), contactEmail: z.union([z.literal(""), z.email().max(254)]), notes: optionalText(4000) }).strict()).max(MAX_RECORDS),
     homes: z.array(z.object({ ...recordFields, code: text(80), name: text(160), description: optionalText(2000) }).strict()).max(MAX_RECORDS),
-    resources: z.array(z.object({ ...recordFields, name: text(160), home: text(80), ownerId: id, profile: profileSchema.optional() }).strict()).max(MAX_RECORDS),
+    resources: z.array(z.object({ ...recordFields, name: text(160), home: optionalText(80), ownerId: planningOwnerId, profile: profileSchema.optional() }).strict()).max(MAX_RECORDS),
     missions: z.array(z.object({ ...recordFields, name: text(160), clientId: id, engagement: engagementPlanSchema.optional() }).strict()).max(MAX_RECORDS),
     capabilities: z.array(capabilitySchema).max(MAX_RECORDS).default([]),
     members: z.array(z.object({ ...recordFields, ...memberFields }).strict()).min(1).max(MAX_RECORDS),
@@ -106,8 +113,8 @@ function validateLinks(data: AdminBootstrap) {
   ensure(owner && owner.name === data.viewer.name, "invalid_import", "The local workspace owner and display name must be preserved.");
   for (const resource of data.resources) {
     const home = data.homes.find(home => home.code === resource.home), member = data.members.find(member => member.id === resource.ownerId);
-    ensure(home && member, "invalid_reference", "Every person needs an existing HOME and local owner.");
-    ensure(!resource.active || (home.active && member.active), "active_dependents", "An active person needs an active HOME and local owner.");
+    ensure((!resource.home || home) && (!resource.ownerId || member), "invalid_reference", "A person's recorded HOME and owner must exist.");
+    ensure(!resource.active || ((!home || home.active) && (!member || member.active)), "active_dependents", "An active person's recorded HOME and owner must be active.");
   }
   for (const mission of data.missions) {
     const client = data.clients.find(client => client.id === mission.clientId);
@@ -181,10 +188,18 @@ function current<T extends { id: string; revision: number }>(records: T[], recor
 function activeHome(data: AdminBootstrap, code: string) { ensure(data.homes.some(home => home.code === code && home.active), "invalid_home", "Choose an active HOME."); }
 function activeClient(data: AdminBootstrap, clientId: string) { ensure(data.clients.some(client => client.id === clientId && client.active), "invalid_client", "Choose an active client."); }
 
+/** Planning records may leave ownership and HOME undecided; operational administration stays strict. */
+export function parseLocalAdminCommand(raw: unknown): LocalAdminCommand {
+  const type = raw && typeof raw === "object" && "type" in raw ? raw.type : undefined;
+  if (type === "create_local_member") return localMemberCommand.parse(raw);
+  if (type === "save_resource") return localResourceCommand.parse(raw);
+  return adminRequestSchema.parse({ idempotencyKey: LOCAL_ADMIN_OWNER_ID, command: raw }).command;
+}
+
 /** Pure local reducer: the caller owns persistence, cross-tab revision checks, and backup storage. */
 export function applyLocalAdminCommand(input: LocalAdminStore, raw: LocalAdminCommand): LocalAdminStore {
   const store = parseLocalAdminStore(input), data = store.data;
-  const command = raw.type === "create_local_member" ? localMemberCommand.parse(raw) : adminRequestSchema.parse({ idempotencyKey: LOCAL_ADMIN_OWNER_ID, command: raw }).command;
+  const command = parseLocalAdminCommand(raw);
   const now = new Date().toISOString();
   switch (command.type) {
     case "set_organization":
@@ -205,8 +220,8 @@ export function applyLocalAdminCommand(input: LocalAdminStore, raw: LocalAdminCo
       if (record) Object.assign(record, value); else data.homes.push(value); break;
     }
     case "save_resource": {
-      activeHome(data, command.home);
-      ensure(data.members.some(member => member.id === command.ownerId && member.active), "invalid_owner", "Choose an active local owner.");
+      if (command.home) activeHome(data, command.home);
+      ensure(!command.ownerId || data.members.some(member => member.id === command.ownerId && member.active), "invalid_owner", "Choose an active local owner.");
       const record = command.id ? current(data.resources, command.id, command.expectedRevision) : null;
       const profile = command.profile ?? record?.profile;
       const value = { id: record?.id ?? crypto.randomUUID(), name: command.name, home: command.home, ownerId: command.ownerId, active: record?.active ?? true, revision: (record?.revision ?? 0) + 1, ...(profile ? { profile } : {}) };

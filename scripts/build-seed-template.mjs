@@ -71,7 +71,7 @@ const color = { paper: '#F8F6F1', white: '#FFFFFF', ink: '#20283F', muted: '#657
 const sheetSpecs = [
   { name: 'HOMEs', title: 'HOMEs', note: 'Enter one HOME per row. The first two columns are required.', headers: ['HOME code', 'HOME name', 'Description'], widths: [26, 38, 64] },
   { name: 'Clients', title: 'Clients', note: 'Enter one client per row. The first two columns are required.', headers: ['Client code', 'Client name', 'Contact name', 'Contact email', 'Notes'], widths: [22, 34, 28, 37, 48] },
-  { name: 'People', title: 'People', note: 'Name and HOME are required. Separate delivery roles and skills with semicolons. Owner is optional.', headers: ['Person name', 'HOME code', 'Owner name', 'Delivery roles', 'Skills'], widths: [32, 22, 28, 43, 48] },
+  { name: 'People', title: 'People', note: 'Only name is required. HOME and owner are optional. Separate delivery roles and skills with semicolons.', headers: ['Person name', 'HOME code', 'Owner name', 'Delivery roles', 'Skills'], widths: [32, 22, 28, 43, 48], required: [0] },
   { name: 'Missions', title: 'Missions', note: 'Enter one mission per row. Both columns are required.', headers: ['Mission name', 'Client code'], widths: [58, 48] },
   { name: 'Engagements', title: 'Engagements / SOWs', note: 'One SOW engagement per row. Add its team on Engagement roles. Dates include the last day.', headers: ['Engagement name', 'Client code', 'SOW reference', 'Status', 'Signed on', 'Start date', 'End date', 'Outcomes'], widths: [35, 20, 26, 18, 18, 18, 18, 54], required: [0,1,5,6] },
   { name: 'Engagement roles', title: 'Engagement roles / your delivery team', note: 'One row per role. Enter allocation as 100 for full-time or 50 for half-time. Blank dates use engagement dates.', headers: ['Engagement name', 'Client code', 'Role name', 'Headcount', 'Allocation %', 'Skills', 'Responsibilities', 'Start date', 'End date'], widths: [35, 20, 30, 17, 20, 44, 60, 18, 18], required: [0,1,2,3,4] },
@@ -97,7 +97,7 @@ guide.getRange('B3').values = [['Workspace seed template']];
 guide.getRange('B3:E3').format = { font: { name: 'Arial', size: 17, bold: true, color: color.ink }, rowHeight: 33 };
 guide.getRange('B4:E4').format = { rowHeight: 8, borders: { bottom: { style: 'medium', color: color.coral } } };
 guide.getRange('B6').values = [['1. Set up the basics']];
-guide.getRange('C6').values = [['Add HOMEs and Clients. Define Roles and Skills, then add People.']];
+guide.getRange('C6').values = [['Add People and Clients. Define Roles and Skills; add HOMEs when useful.']];
 guide.getRange('B7').values = [['2. Build the team']];
 guide.getRange('C7').values = [['Add Engagements, then Engagement roles. Match engagement names and client codes.']];
 guide.getRange('B8').values = [['3. Review in Admin']];
@@ -107,8 +107,8 @@ guide.getRange('B10').values = [['Input rules']];
 guide.getRange('B10:E10').format = { fill: color.cobalt, font: { name: 'Arial', size: 11, bold: true, color: color.white }, rowHeight: 27 };
 guide.getRange('B11').values = [['Required fields']];
 guide.getRange('C11').values = [['Blue headings are required. All other columns are optional unless noted below.']];
-guide.getRange('B12').values = [['Owner name']];
-guide.getRange('C12').values = [['Optional. Leave blank for the workspace owner, or match an existing owner name.']];
+guide.getRange('B12').values = [['HOME / owner']];
+guide.getRange('C12').values = [['Optional for People. New people stay ungrouped and unowned when blank.']];
 guide.getRange('B13').values = [['Codes']];
 guide.getRange('C13').values = [['Use unique HOME and client codes. Match names and codes exactly across tabs.']];
 guide.getRange('B14').values = [['Input area']];
@@ -122,17 +122,17 @@ guide.getRange('B18').values = [['Fictional examples']];
 guide.getRange('C18').values = [['For reference only. This guide tab is never imported.']];
 guide.getRange('B18:E18').format = { fill: '#FCE9E3', rowHeight: 28 };
 guide.getRange('B18').format.font = { name: 'Arial', size: 11, bold: true, color: color.ink };
-guide.getRange('B20:E20').values = [['Tab', 'First required field', 'Second required field', 'Meaning']];
+guide.getRange('B20:E20').values = [['Tab', 'First required field', 'Second field', 'Meaning']];
 guide.getRange('B20:E20').format = { fill: color.optional, font: { name: 'Arial', size: 11, bold: true, color: color.white }, rowHeight: 27 };
 guide.getRange('B21:E24').values = [
   ['HOMEs', 'DESIGN', 'Design studio', 'Create this HOME'],
   ['Clients', 'ACORN', 'Acorn Studio', 'Create this client'],
-  ['People', 'Taylor Example', 'DESIGN', 'Person belongs to DESIGN'],
+  ['People', 'Taylor Example', '', 'Add a person without a HOME'],
   ['Missions', 'Acorn website', 'ACORN', 'Mission belongs to ACORN'],
 ];
 guide.getRange('B21:E24').format = { fill: color.white, rowHeight: 26, borders: { insideHorizontal: { style: 'thin', color: color.line } } };
 guide.getRange('B26').values = [['Ready to begin']];
-guide.getRange('C26').values = [['Open HOMEs and enter your first record in row 5.']];
+guide.getRange('C26').values = [['Open People or Clients and enter your first record in row 5.']];
 guide.getRange('B26').format.font = { name: 'Arial', size: 11, bold: true, color: color.cobalt };
 guide.getRange('C6:E16').format.font.color = color.muted;
 guide.getRange('C18:E18').format.font.color = color.muted;
@@ -141,10 +141,10 @@ guide.getRange('B28').values = [['Importing again']];
 guide.getRange('B28:E28').format = { fill: '#FCE9E3', font: { name: 'Arial', size: 11, bold: true, color: color.ink }, rowHeight: 28 };
 guide.getRange('B29').values = [['Matching codes']];
 guide.getRange('C29').values = [['Matching HOME and client codes update existing records.']];
-guide.getRange('B30').values = [['Optional fields']];
-guide.getRange('C30').values = [['Blank optional cells clear saved values. Blank Owner name uses the workspace owner.']];
+guide.getRange('B30').values = [['People links']];
+guide.getRange('C30').values = [['Blank HOME / owner keeps existing links. Clear or change a HOME in Admin.']];
 guide.getRange('B31').values = [['Names and roles']];
-guide.getRange('C31').values = [['Rename in Admin. New names add records. Unlisted delivery roles are kept.']];
+guide.getRange('C31').values = [['Blank HOME matches one unique person name. Duplicate names need a HOME code.']];
 guide.getRange('B32').values = [['Review first']];
 guide.getRange('C32').values = [['Check each update in the import preview before applying it.']];
 guide.getRange('B29:B32').format.font = { name: 'Arial', size: 11, bold: true, color: color.ink };
@@ -174,7 +174,7 @@ guide.getRange('C44').values = [['Every engagement needs at least one role. Skil
 guide.getRange('B45').values = [['Earlier workbooks']];
 guide.getRange('C45').values = [['Missions is supported for names only. Use Engagements for SOWs and team demand.']];
 guide.getRange('B46').values = [['Optional columns']];
-guide.getRange('C46').values = [['Remove an optional column to keep saved values. Present blank cells clear values.']];
+guide.getRange('C46').values = [['Other optional blanks clear values. Omit columns to keep them. Rename in Admin.']];
 guide.getRange('B35:B46').format.font = { name: 'Arial', size: 11, bold: true, color: color.ink };
 guide.getRange('C35:E46').format.font.color = color.muted;
 guide.getRange('B48').values = [['Your role and skills catalog']];
@@ -238,7 +238,7 @@ for (const name of ['Start here', ...sheetSpecs.map(s => s.name)]) {
   const range = name === 'Start here' ? 'A1:F53' : `A1:${String.fromCharCode(64 + sheetSpecs.find(s => s.name === name).headers.length)}13`;
   const check = await workbook.inspect({ kind: 'table', range: `'${name}'!${name === 'Start here' ? 'B18:E24' : 'A4:E6'}`, include: 'values,formulas', tableMaxRows: 7, tableMaxCols: 5, maxChars: 1600 });
   console.log(check.ndjson);
-  if (!process.argv.includes('--guide-only-render') || name === 'Start here') {
+  if ((!process.argv.includes('--guide-only-render') && !process.argv.includes('--people-guide-render')) || name === 'Start here' || (process.argv.includes('--people-guide-render') && name === 'People')) {
     const render = await workbook.render({ sheetName: name, range, scale: 1.5, format: 'png' });
     await fs.writeFile(`${previews}/${name.replaceAll(' ', '-')}.png`, new Uint8Array(await render.arrayBuffer()));
   }

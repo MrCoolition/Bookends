@@ -16,7 +16,7 @@ test("spreadsheet preview resolves parents in any sheet order and commits a whol
   assert.deepEqual(plan.errors,[]);assert.deepEqual(plan.counts,{adds:4,updates:0,skips:0});assert.deepEqual(store,before);
   const next=applySpreadsheetImport(store,plan);
   assert.deepEqual(store,before);assert.equal(next.revision,store.revision+1);
-  assert.equal(next.data.resources[0].home,"Data");assert.equal(next.data.resources[0].ownerId,LOCAL_ADMIN_OWNER_ID);
+  assert.equal(next.data.resources[0].home,"Data");assert.equal(next.data.resources[0].ownerId,"");
   assert.equal(next.data.missions[0].clientId,next.data.clients[0].id);
   const repeated=planSpreadsheetImport(next,example());
   assert.deepEqual(repeated.counts,{adds:0,updates:0,skips:4});
@@ -43,11 +43,60 @@ test("owner names resolve existing active local members and updates show names r
   store=applyLocalAdminCommand(store,{type:"create_local_member",name:"Jamie Owner",role:"mission_owner",homeScope:null,resourceId:null,grants:[]});
   const workbook:SpreadsheetWorkbook={sheets:[sheet("People",[["Alex Morgan","Data","Jamie Owner"]])]};
   const plan=planSpreadsheetImport(store,workbook);
-  assert.deepEqual(plan.errors,[]);assert.deepEqual(plan.changes[0].fields,[{field:"Owner name",before:"Workspace owner",after:"Jamie Owner"}]);
+  assert.deepEqual(plan.errors,[]);assert.deepEqual(plan.changes[0].fields,[{field:"Owner name",before:"No owner",after:"Jamie Owner"}]);
   const next=applySpreadsheetImport(store,plan);assert.equal(next.data.resources[0].id,store.data.resources[0].id);
   assert.equal(next.data.resources[0].ownerId,store.data.members.find(member=>member.name==="Jamie Owner")!.id);
   store=applyLocalAdminCommand(store,{type:"create_local_member",name:"Jamie Owner",role:"mission_owner",homeScope:null,resourceId:null,grants:[]});
   assert.ok(planSpreadsheetImport(store,workbook).errors.some(error=>error.field==="Owner name"&&error.message.includes("exactly one")));
+});
+
+test("People imports can add ungrouped, unowned teammates with just their names and roles", () => {
+  const store = createLocalAdminStore();
+  const workbook: SpreadsheetWorkbook = { sheets: [sheet("People", [["Caleb Keyes", "Engineer Lead"], ["Spencer King", "Engineer"]], ["Person name", "Delivery roles"])] };
+  const plan = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(plan.errors, []);
+  assert.deepEqual(plan.counts, { adds: 2, updates: 0, skips: 0 });
+  const next = applySpreadsheetImport(store, plan);
+  assert.equal(next.data.homes.length, 0);
+  assert.deepEqual(next.data.resources.map(person => ({ name: person.name, home: person.home, ownerId: person.ownerId, roles: person.profile?.roles })), [
+    { name: "Caleb Keyes", home: "", ownerId: "", roles: ["Engineer Lead"] },
+    { name: "Spencer King", home: "", ownerId: "", roles: ["Engineer"] },
+  ]);
+  assert.deepEqual(planSpreadsheetImport(next, workbook).counts, { adds: 0, updates: 0, skips: 2 });
+});
+
+test("blank People relationships preserve existing links and identity instead of adding or regrouping", () => {
+  let store = imported();
+  const person = store.data.resources[0];
+  store = applyLocalAdminCommand(store, { type: "save_resource", id: person.id, expectedRevision: person.revision, name: person.name, home: person.home, ownerId: LOCAL_ADMIN_OWNER_ID });
+  const workbook: SpreadsheetWorkbook = { sheets: [sheet("People", [["Alex Morgan", "", "", "Engineer Lead", "SQL"]])] };
+  const plan = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(plan.errors, []);
+  assert.deepEqual(plan.counts, { adds: 0, updates: 1, skips: 0 });
+  const next = applySpreadsheetImport(store, plan);
+  assert.equal(next.data.resources.length, 1);
+  assert.equal(next.data.resources[0].id, person.id);
+  assert.equal(next.data.resources[0].home, "Data");
+  assert.equal(next.data.resources[0].ownerId, LOCAL_ADMIN_OWNER_ID);
+  assert.deepEqual(next.data.resources[0].profile, { roles: ["Engineer Lead"], skills: ["SQL"] });
+  assert.equal(plan.changes[0].fields?.length, 1);
+});
+
+test("blank People relationships retain duplicate and supplied-reference protection", () => {
+  let store = imported();
+  store = applyLocalAdminCommand(store, { type: "save_home", code: "Apps", name: "Application delivery", description: "" });
+  store = applyLocalAdminCommand(store, { type: "save_resource", name: "Alex Morgan", home: "Apps", ownerId: "" });
+  assert.ok(planSpreadsheetImport(store, { sheets: [sheet("People", [["Alex Morgan"]], ["Person name"])] }).errors.some(error => error.message.includes("More than one existing person")));
+  const scoped = planSpreadsheetImport(store, { sheets: [sheet("People", [["Alex Morgan", "Data", "", "Engineer"]])] });
+  assert.deepEqual(scoped.errors, []);
+  assert.equal(scoped.counts.updates, 1);
+  for (const rows of [[["New person", ""], ["New person", "Data"]], [["New person", "Data"], ["New person", ""]]]) {
+    assert.ok(planSpreadsheetImport(store, { sheets: [sheet("People", rows)] }).errors.some(error => error.message.includes("more than once with a blank HOME")));
+  }
+  const unknownOwner = planSpreadsheetImport(store, { sheets: [sheet("People", [["New person", "", "Unknown owner"]])] });
+  assert.ok(unknownOwner.errors.some(error => error.field === "Owner name"));
+  const unknownHome = planSpreadsheetImport(store, { sheets: [sheet("People", [["New person", "Unknown HOME", ""]])] });
+  assert.ok(unknownHome.errors.some(error => error.field === "HOME code"));
 });
 
 test("duplicate and archived matches, unknown columns and invalid references block the entire import", () => {

@@ -85,6 +85,41 @@ test("session expiration preserves a client draft through re-unlock", async ({ p
   expect(state.writes).toEqual(["POST"]);
 });
 
+test("a person can be added and edited with roles while HOME and owner remain unassigned", async ({ page }) => {
+  const state = await mockWorkspace(page);
+  const originalMembers = structuredClone(state.store.data.members);
+  await page.goto("/admin?section=people");
+  await page.getByRole("button", { name: "Add person", exact: true }).first().click();
+  let editor = page.getByRole("dialog", { name: "A new person", exact: true });
+  await editor.getByLabel("Person’s name", { exact: true }).fill("Independent teammate");
+  await editor.getByLabel("Delivery roles", { exact: true }).fill("Engineer");
+  await expect(editor.getByLabel(/^HOME/)).toHaveValue("");
+  await expect(editor.getByLabel(/^Accountable owner/)).toHaveValue("");
+  await editor.getByRole("button", { name: "Add person", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  expect(state.store.data.resources).toHaveLength(1);
+  const person = state.store.data.resources[0];
+  expect(person).toMatchObject({ name: "Independent teammate", home: "", ownerId: "", profile: { roles: ["Engineer"], skills: [] } });
+  expect(state.store.data.homes).toEqual([]);
+  expect(state.store.data.members).toEqual(originalMembers);
+  await page.reload();
+  const row = page.getByRole("button", { name: /Independent teammate/ });
+  await expect(row).toContainText("Engineer");
+  await row.click();
+  editor = page.getByRole("dialog", { name: "Edit person", exact: true });
+  await expect(editor.getByLabel(/^HOME/)).toHaveValue("");
+  await expect(editor.getByLabel(/^Accountable owner/)).toHaveValue("");
+  await editor.getByLabel("Delivery roles", { exact: true }).fill("Engineer Lead");
+  await editor.getByRole("button", { name: "Save person", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(row).toContainText("Engineer Lead");
+  expect(state.store.data.resources).toHaveLength(1);
+  expect(state.store.data.resources[0]).toMatchObject({ id: person.id, home: "", ownerId: "", profile: { roles: ["Engineer Lead"], skills: [] } });
+  expect(state.store.data.homes).toEqual([]);
+  expect(state.store.data.members).toEqual(originalMembers);
+  expect(state.writes).toEqual(["POST", "POST"]);
+});
+
 test("another browser's revision cannot be overwritten and refresh retains unsaved inputs", async ({ page }) => {
   const state = await mockWorkspace(page);
   await page.goto("/admin");
@@ -322,6 +357,7 @@ test("adding the first teammate retries a lost practice acknowledgment without c
   await page.getByRole("button", { name: "Add a teammate", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Add a teammate.", exact: true });
   await dialog.getByLabel("Full name", { exact: true }).fill("New teammate");
+  await dialog.getByLabel(/^HOME \/ practice/).selectOption("new");
   await dialog.getByLabel("Practice name", { exact: true }).fill("Engineering");
   await dialog.getByLabel(/^Delivery roles/).fill("Data engineer");
   await dialog.getByLabel(/^Skills/).fill("SQL, Python");
@@ -337,4 +373,24 @@ test("adding the first teammate retries a lost practice acknowledgment without c
   expect(state.writes).toEqual(["POST", "POST"]);
   await page.getByRole("button", { name: "Select New teammate for Data engineer", exact: true }).click();
   await expect(page.locator(".ts-position-filled")).toContainText("New teammate");
+});
+
+test("a Studio teammate needs no practice or owner to be matched and selected", async ({ page }) => {
+  const state = await mockWorkspace(page);
+  const originalMembers = structuredClone(state.store.data.members);
+  await directBoard(page, false, false);
+  await page.getByRole("button", { name: "Add a teammate", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Add a teammate.", exact: true });
+  await dialog.getByLabel("Full name", { exact: true }).fill("Independent engineer");
+  await dialog.getByLabel(/^Delivery roles/).fill("Data engineer");
+  await dialog.getByRole("button", { name: "Add to the workspace", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(state.store.data.resources).toHaveLength(1);
+  expect(state.store.data.resources[0]).toMatchObject({ name: "Independent engineer", home: "", ownerId: "", profile: { roles: ["Data engineer"], skills: [] } });
+  expect(state.store.data.homes).toEqual([]);
+  expect(state.store.data.members).toEqual(originalMembers);
+  await page.getByRole("button", { name: /Role & skill matches/ }).click();
+  await page.getByRole("button", { name: "Select Independent engineer for Data engineer", exact: true }).click();
+  await expect(page.locator(".ts-position-filled")).toContainText("Independent engineer");
+  expect(state.writes).toEqual(["POST"]);
 });

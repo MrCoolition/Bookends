@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { adminRequestSchema } from "./validation";
-import { LOCAL_ADMIN_OWNER_ID, parseLocalAdminStore, type LocalAdminStore } from "./local";
+import { LOCAL_ADMIN_OWNER_ID, parseLocalAdminCommand, parseLocalAdminStore, type LocalAdminStore } from "./local";
 import type { AdminCapability, AdminClient, AdminHome, AdminMission, AdminResource } from "./contracts";
 import { capabilityNameKey, engagementPlanSchema, type EngagementPlan, type EngagementRole } from "./engagement";
 import { formatNamedList, parseNamedList } from "./named-list";
@@ -53,6 +53,7 @@ function nonblank(cell: SpreadsheetCell | undefined) { return cell !== undefined
 function isDataSheet(name: string): name is SpreadsheetSheetName { return Object.hasOwn(SPREADSHEET_HEADERS, name); }
 type ImportedRow = { sheet: SpreadsheetSheetName; row: number; values: Map<string, string>; columns: Set<string> };
 function requiredHeaders(name: SpreadsheetSheetName): readonly string[] {
+  if (name === "People") return ["Person name"];
   if (name === "Roles" || name === "Skills") return ["Name"];
   if (name === "Engagements") return ["Engagement name", "Client code", "Start date", "End date"];
   if (name === "Engagement roles") return SPREADSHEET_HEADERS[name].slice(0, 5);
@@ -143,6 +144,14 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
     return { existing: found[0], valid: true };
   }
   function validate(row: ImportedRow, command: unknown, fields: Record<string, string>) {
+    if (row.sheet === "People") {
+      try { parseLocalAdminCommand(command); return true; }
+      catch (error) {
+        if (!(error instanceof z.ZodError)) throw error;
+        for (const issue of error.issues) rowIssue(row, fields[String(issue.path[0])] ?? "Row", issue.message);
+        return false;
+      }
+    }
     const result = adminRequestSchema.safeParse({ idempotencyKey: LOCAL_ADMIN_OWNER_ID, command });
     if (!result.success) {
       for (const issue of result.error.issues) {
@@ -158,7 +167,7 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
     if (existing) {
       if (!changed(existing, values as Partial<T>)) { changes.push({ sheet: row.sheet, row: row.row, action: "skip", label }); return; }
       const fieldLabels: Record<string, string> = { name: row.sheet === "HOMEs" ? "HOME name" : row.sheet === "Clients" ? "Client name" : row.sheet === "People" ? "Person name" : row.sheet === "Roles" || row.sheet === "Skills" ? "Name" : "Mission name", code: row.sheet === "HOMEs" ? "HOME code" : "Client code", description: "Description", contactName: "Contact name", contactEmail: "Contact email", notes: "Notes", home: "HOME code", ownerId: "Owner name", clientId: "Client code" };
-      const display = (field: string, value: unknown) => field === "ownerId" ? data.members.find(member => member.id === value)?.name ?? "Unavailable owner" : field === "clientId" ? data.clients.find(client => client.id === value)?.code ?? "Unavailable client" : field === "engagement" && value ? describeEngagement(value as EngagementPlan) : field === "profile" && value ? `${formatNamedList((value as { roles: string[] }).roles) || "No delivery roles"} · ${formatNamedList((value as { skills: string[] }).skills) || "No skills"}` : String(value ?? "");
+      const display = (field: string, value: unknown) => field === "ownerId" ? value ? data.members.find(member => member.id === value)?.name ?? "Unavailable owner" : "No owner" : field === "clientId" ? data.clients.find(client => client.id === value)?.code ?? "Unavailable client" : field === "engagement" && value ? describeEngagement(value as EngagementPlan) : field === "profile" && value ? `${formatNamedList((value as { roles: string[] }).roles) || "No delivery roles"} · ${formatNamedList((value as { skills: string[] }).skills) || "No skills"}` : String(value ?? "");
       const fields = Object.entries(values).filter(([field, value]) => !equal(existing[field as keyof T], value)).map(([field, value]) => ({ field: field === "engagement" ? "SOW and delivery dates" : field === "profile" ? "Delivery roles and skills" : fieldLabels[field] ?? field, before: display(field, existing[field as keyof T]), after: display(field, value) }));
       Object.assign(existing, values); existing.revision++;
       changes.push({ sheet: row.sheet, row: row.row, action: "update", label, fields });
@@ -191,19 +200,26 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
       if (!validate(row, { type: "save_client", ...fields }, { code: "Client code", name: "Client name", contactName: "Contact name", contactEmail: "Contact email", notes: "Notes" })) continue;
       merge<AdminClient>(row, found.existing, fields, data.clients, clients, code, `${fields.name} · ${code}`);
     } else if (name === "People") {
-      const home = value("HOME code"), personName = value("Person name"), personKey = key(personName, home);
+      const suppliedHome = value("HOME code"), personName = value("Person name");
+      const sameNameRows = rows.filter(item => item.sheet === "People" && item.values.get("Person name") === personName);
+      if (sameNameRows.length > 1 && sameNameRows.some(item => !item.values.get("HOME code"))) { rowIssue(row, "Person name", "This name appears more than once with a blank HOME. Keep one row for this person, or supply distinct HOME codes for different people with the same name."); continue; }
+      const namedPeople = data.resources.filter(person => person.name === personName);
+      if (!suppliedHome && namedPeople.length > 1) { rowIssue(row, "Person name", "More than one existing person has this name. Supply the HOME code to identify the intended person, or resolve duplicates in Administration."); continue; }
+      // Blank relationships never remove established links. A new person may
+      // remain ungrouped and unowned; an existing unique name keeps its identity.
+      const home = suppliedHome || namedPeople[0]?.home || "", personKey = key(personName, home);
       const found = identify(row, personKey, people, "Person name"); if (!found.valid) continue;
-      if (!homes.get(home)?.[0]?.active) { rowIssue(row, "HOME code", "Choose an active HOME code already in the workspace or included on the HOMEs sheet."); continue; }
+      if (home && !homes.get(home)?.[0]?.active) { rowIssue(row, "HOME code", "Choose an active HOME code already in the workspace or included on the HOMEs sheet."); continue; }
       const ownerName = value("Owner name");
-      const owners = data.members.filter(member => member.active && (ownerName ? member.name === ownerName : member.id === LOCAL_ADMIN_OWNER_ID));
-      if (owners.length !== 1) { rowIssue(row, "Owner name", ownerName ? "Owner name must match exactly one active local member. Resolve missing or duplicate names in Administration." : "The default workspace owner is inactive. Choose another active local member by name."); continue; }
+      const owners = ownerName ? data.members.filter(member => member.active && member.name === ownerName) : [];
+      if (ownerName && owners.length !== 1) { rowIssue(row, "Owner name", "Owner name must match exactly one active local member. Resolve missing or duplicate names in Administration."); continue; }
       const current = found.existing?.profile;
       const roles = row.columns.has("Delivery roles") ? listCell(row, "Delivery roles", value("Delivery roles")) : current?.roles ?? [];
       const skills = row.columns.has("Skills") ? listCell(row, "Skills", value("Skills")) : current?.skills ?? [];
       if (!roles || !skills) continue;
-      const fields = { name: personName, home, ownerId: owners[0].id, ...(row.columns.has("Delivery roles") || row.columns.has("Skills") ? { profile: { roles, skills } } : {}) };
+      const fields = { name: personName, home, ownerId: owners[0]?.id ?? found.existing?.ownerId ?? "", ...(row.columns.has("Delivery roles") || row.columns.has("Skills") ? { profile: { roles, skills } } : {}) };
       if (!validate(row, { type: "save_resource", ...fields }, { name: "Person name", home: "HOME code", ownerId: "Owner name", profile: "Delivery roles and skills" })) continue;
-      merge<AdminResource>(row, found.existing, fields, data.resources, people, personKey, `${personName} · ${home}`);
+      merge<AdminResource>(row, found.existing, fields, data.resources, people, personKey, home ? `${personName} · ${home}` : personName);
     } else if (name === "Engagement roles") {
       const clientCode = value("Client code"), missionName = value("Engagement name"), roleName = value("Role name"), missionKey = key(missionName, clientCode);
       const found = missions.get(missionKey) ?? [], mission = found[0];

@@ -78,6 +78,33 @@ test("reviewed import is atomic, validates references, and retains shared revisi
   assert.deepEqual(await scoped("main", query => loadSharedStore(query, "main")), saved);
 });
 
+test("shared planning persists individual people without assigning HOME or owner and rejects invalid references atomically", async () => {
+  const first = await scoped("main", query => loadSharedStore(query, "main"));
+  const command = { type: "save_resource", name: "Independent teammate", home: "", ownerId: "", profile: { roles: ["Engineer"], skills: [] } };
+  const request = { expectedRevision: first.revision, idempotencyKey: randomUUID(), command };
+  let saved = await scoped("main", query => saveSharedStore(query, session, request, "command"));
+  const person = saved.data.resources.find(resource => resource.name === command.name)!;
+  assert.equal(person.home, ""); assert.equal(person.ownerId, "");
+  assert.deepEqual(saved.data.homes, first.data.homes);
+  assert.deepEqual(saved.data.members, first.data.members);
+  assert.deepEqual(await scoped("main", query => saveSharedStore(query, session, request, "command")), saved);
+  assert.deepEqual(await scoped("main", query => loadSharedStore(query, "main")), saved);
+  saved = await scoped("main", query => saveSharedStore(query, session, {
+    expectedRevision: saved.revision, command: { ...command, id: person.id, expectedRevision: person.revision, profile: { roles: ["Engineer Lead"], skills: [] } },
+  }, "command"));
+  assert.equal(saved.data.resources.find(resource => resource.id === person.id)!.revision, 2);
+  assert.deepEqual(saved.data.resources.find(resource => resource.id === person.id)!.profile, { roles: ["Engineer Lead"], skills: [] });
+  for (const patch of [{ home: "missing" }, { ownerId: randomUUID() }]) {
+    await assert.rejects(scoped("main", query => saveSharedStore(query, session, { expectedRevision: saved.revision, command: { ...command, ...patch } }, "command")));
+    assert.deepEqual(await scoped("main", query => loadSharedStore(query, "main")), saved);
+  }
+  const roundTrip = JSON.parse(JSON.stringify(saved));
+  const restored = await scoped("main", query => saveSharedStore(query, session, { expectedRevision: saved.revision, store: roundTrip }, "snapshot"));
+  assert.equal(restored.revision, saved.revision + 1);
+  assert.deepEqual(restored.data.resources, saved.data.resources);
+  assert.deepEqual(await scoped("main", query => loadSharedStore(query, "main")), restored);
+});
+
 test("shared tables deny missing and foreign scope, deletes, audit edits and identity access", async () => {
   assert.deepEqual((await scoped("", query => query.query("SELECT workspace_id FROM be_shared_workspaces"))).rows, []);
   assert.deepEqual((await scoped("other", query => query.query("SELECT workspace_id FROM be_shared_workspaces"))).rows, []);
