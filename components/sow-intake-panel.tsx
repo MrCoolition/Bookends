@@ -13,15 +13,18 @@ function failureMessage(value: unknown, fallback: string): string {
   return fallback;
 }
 
-export function SowIntakePanel({ onDraft, onCancel }: { onDraft: (result: SowIntakeResult) => void; onCancel: () => void }) {
+export function SowIntakePanel({ onDraft, onCancel, onSessionExpired }: { onDraft: (result: SowIntakeResult) => void; onCancel: () => void; onSessionExpired?: () => void }) {
   const id = useId(), fileInput = useRef<HTMLInputElement>(null), errorBox = useRef<HTMLDivElement>(null);
   const generation = useRef<AbortController | null>(null);
+  const sessionExpired = useRef(onSessionExpired);
   const [mode, setMode] = useState<"file" | "text">("file"), [file, setFile] = useState<File | null>(null), [text, setText] = useState("");
   const [capability, setCapability] = useState<SowCapability | null>(null), [connectionError, setConnectionError] = useState(""), [connectionAttempt, setConnectionAttempt] = useState(0);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false), [dragging, setDragging] = useState(false), [elapsed, setElapsed] = useState(0);
+  useEffect(() => { sessionExpired.current = onSessionExpired; }, [onSessionExpired]);
   useEffect(() => {
     const controller = new AbortController();
     void fetch("/api/ai/sow", { signal: controller.signal, cache: "no-store" }).then(async response => {
+      if (response.status === 401 && !controller.signal.aborted) sessionExpired.current?.();
       const value: unknown = await response.json();
       if (!response.ok) throw new Error(failureMessage(value, "The SOW reader could not be reached. Try the connection again."));
       if (!value || typeof value !== "object" || !("available" in value) || typeof value.available !== "boolean") throw new Error("The SOW reader could not be reached. Try the connection again.");
@@ -60,6 +63,7 @@ export function SowIntakePanel({ onDraft, onCancel }: { onDraft: (result: SowInt
     setError(""); setBusy(true); setElapsed(0);
     try {
       const response = await fetch("/api/ai/sow", { method: "POST", body, signal: controller.signal });
+      if (response.status === 401 && !controller.signal.aborted) sessionExpired.current?.();
       const value: unknown = await response.json();
       if (!response.ok) throw new Error(failureMessage(value, "The reader couldn't finish this document. Try again, paste the relevant text, or build your team directly."));
       if (!value || typeof value !== "object" || !("draftOnly" in value) || value.draftOnly !== true || !("draft" in value) || !value.draft) throw new Error("The reader couldn't produce a reviewable draft. Try a clearer brief.");

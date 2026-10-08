@@ -156,3 +156,50 @@ test("intake is legible and keyboard accessible on desktop and a 320px phone", a
   await page.getByRole("button", { name: "Bring the plan to life" }).focus(); await page.keyboard.press("Enter");
   await expect(page.getByLabel("Engagement / workstream name")).toHaveValue("Customer data platform");
 });
+
+test("expired reader sessions open the unlock dialog and preserve both pasted text and the selected file for retry", async ({ page }) => {
+  const workspace = await mockWorkspace(page); let authenticated = true, checks = 0, reads = 0;
+  await page.route("**/api/shared/session", async route => {
+    if (route.request().method() === "POST") authenticated = true;
+    await route.fulfill({ json: { authenticated, configured: true } });
+  });
+  await page.route("**/api/shared/admin", route => authenticated ? route.fulfill({ json: workspace.store() }) : route.fulfill({ status: 401, json: { error: { code: "unauthenticated", message: "Enter the workspace passcode to continue." } } }));
+  await page.route("**/api/ai/sow", async route => {
+    if (route.request().method() === "GET") {
+      checks++;
+      if (checks === 1) authenticated = false;
+      if (authenticated) { await route.fulfill({ json: { available: true, maxFileBytes: 3 * 1024 * 1024, maxTextCharacters: 60_000, formats: ["pdf", "docx", "txt"] } }); return; }
+    } else {
+      reads++;
+      expect(route.request().postDataBuffer()!.toString()).toContain('filename="retained-SOW.pdf"');
+      if (reads === 1) authenticated = false;
+      if (authenticated) { await route.fulfill({ json: result() }); return; }
+    }
+    await route.fulfill({ status: 401, json: { code: "unauthenticated", error: "Enter the workspace passcode to continue." } });
+  });
+  await page.goto("/studio");
+  await page.getByRole("button", { name: /Start from an SOW/ }).click();
+  const unlock = async () => {
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText("Your session ended. Unlock to continue with your draft right where you left it.", { exact: true })).toBeVisible();
+    await dialog.getByLabel("Workspace passcode", { exact: true }).fill("test-only-passcode");
+    await dialog.getByRole("button", { name: "Enter workspace", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+  };
+  await unlock();
+  await page.getByRole("button", { name: "Check connection", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Bring the plan to life" })).toBeEnabled();
+  await page.getByRole("button", { name: "Paste a brief", exact: true }).click();
+  await page.getByLabel("Paste the SOW or workstream brief").fill(brief);
+  await page.getByRole("button", { name: "Upload a document", exact: true }).click();
+  await page.getByLabel("Choose SOW document", { exact: true }).setInputFiles({ name: "retained-SOW.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.7\nSynthetic retained input fixture") });
+  await page.getByRole("button", { name: "Bring the plan to life" }).click();
+  await unlock();
+  await expect(page.getByText("retained-SOW.pdf", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Paste a brief", exact: true }).click();
+  await expect(page.getByLabel("Paste the SOW or workstream brief")).toHaveValue(brief);
+  await page.getByRole("button", { name: "Upload a document", exact: true }).click();
+  await page.getByRole("button", { name: "Bring the plan to life" }).click();
+  await expect(page.getByLabel("Engagement / workstream name")).toHaveValue("Customer data platform");
+  expect(reads).toBe(2); expect(checks).toBeGreaterThanOrEqual(2); expect(checks).toBeLessThanOrEqual(3); expect(workspace.writes).toHaveLength(0);
+});
