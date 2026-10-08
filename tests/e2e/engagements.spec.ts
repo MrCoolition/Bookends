@@ -204,8 +204,9 @@ test("recorded teammate profiles distinguish skill alignment, missing skills and
   await section(page, "People").click();
   await page.getByRole("button", { name: /Asha Example/ }).click();
   let dialog = page.getByRole("dialog");
-  await expect(dialog.getByLabel(/^Delivery roles/)).toHaveValue("Data engineer");
-  await dialog.getByLabel(/^Skills/).fill("SQL, Python");
+  await expect(dialog.getByRole("button", { name: "Remove Data engineer from roles", exact: true })).toBeVisible();
+  await dialog.getByLabel("Search or add skills", { exact: true }).fill("Python");
+  await dialog.getByLabel("Search or add skills", { exact: true }).press("Enter");
   await action(dialog, "Save person").click();
   await expect(dialog).toHaveCount(0);
   await page.reload();
@@ -234,27 +235,25 @@ test("configured roles and skills feed people and engagement matching while rena
   for (const entry of [{ kind: "role", name: "Delivery analyst" }, { kind: "skill", name: "Cloud (AWS, Azure)" }]) {
     await page.getByRole("button", { name: "Add role or skill", exact: true }).first().click();
     const editor = page.getByRole("dialog");
-    await editor.getByLabel("Type", { exact: true }).selectOption(entry.kind);
+    await editor.getByRole("button", { name: entry.kind === "role" ? "Delivery role A job someone can do" : "Skill A tool or expertise they bring", exact: true }).click();
     await editor.getByLabel("Name", { exact: true }).fill(entry.name);
     await editor.getByLabel("Description", { exact: true }).fill("A shared delivery capability.");
-    await action(editor, "Save role or skill").click();
+    await action(editor, entry.kind === "role" ? "Save role" : "Save skill").click();
     await expect(editor).toHaveCount(0);
   }
   await section(page, "People").click();
   await page.getByRole("button", { name: /Morgan Example/ }).click();
   let dialog = page.getByRole("dialog");
-  await dialog.getByText("Choose configured roles", { exact: true }).click();
-  await action(dialog, "Delivery analyst").click();
-  await dialog.getByText("Choose configured skills", { exact: true }).click();
-  await action(dialog, "Cloud (AWS, Azure)").click();
-  await expect(dialog.getByLabel("Delivery roles", { exact: true })).toHaveValue("Delivery analyst");
-  await expect(dialog.getByLabel("Skills", { exact: true })).toHaveValue('"Cloud (AWS, Azure)"');
+  await dialog.getByRole("region", { name: "Delivery roles", exact: true }).getByRole("button", { name: "Delivery analyst", exact: true }).click();
+  await dialog.getByRole("region", { name: "Skills", exact: true }).getByRole("button", { name: "Cloud (AWS, Azure)", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Remove Delivery analyst from roles", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Remove Cloud (AWS, Azure) from skills", exact: true })).toBeVisible();
   await action(dialog, "Save person").click();
   await expect(dialog).toHaveCount(0);
   await section(page, "Roles & skills").click();
   await page.getByRole("button", { name: /Delivery analyst/ }).click();
   await dialog.getByLabel("Name", { exact: true }).fill("Product analyst");
-  await action(dialog, "Save role or skill").click();
+  await action(dialog, "Save role").click();
   await expect(dialog).toHaveCount(0);
   await page.reload();
   const renamed = (await saved(page)).data.capabilities!.find(entry => entry.kind === "role")!;
@@ -262,7 +261,7 @@ test("configured roles and skills feed people and engagement matching while rena
   expect((await saved(page)).data.resources[0].profile).toEqual({ roles: ["Delivery analyst"], skills: ["Cloud (AWS, Azure)"] });
   await section(page, "People").click();
   await page.getByRole("button", { name: /Morgan Example/ }).click();
-  await expect(dialog.getByLabel("Skills", { exact: true })).toHaveValue('"Cloud (AWS, Azure)"');
+  await expect(dialog.getByRole("button", { name: "Remove Cloud (AWS, Azure) from skills", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Close editor", exact: true }).click();
   dialog = await newEngagement(page, { name: "Requirements and delivery" });
   await action(dialog, "Build the team").click();

@@ -92,7 +92,8 @@ test("a person can be added and edited with roles while HOME and owner remain un
   await page.getByRole("button", { name: "Add person", exact: true }).first().click();
   let editor = page.getByRole("dialog", { name: "A new person", exact: true });
   await editor.getByLabel("Person’s name", { exact: true }).fill("Independent teammate");
-  await editor.getByLabel("Delivery roles", { exact: true }).fill("Engineer");
+  await editor.getByLabel("Search or add roles", { exact: true }).fill("Engineer");
+  await editor.getByLabel("Search or add roles", { exact: true }).press("Enter");
   await expect(editor.getByLabel(/^HOME/)).toHaveValue("");
   await expect(editor.getByLabel(/^Accountable owner/)).toHaveValue("");
   await editor.getByRole("button", { name: "Add person", exact: true }).click();
@@ -109,7 +110,9 @@ test("a person can be added and edited with roles while HOME and owner remain un
   editor = page.getByRole("dialog", { name: "Edit person", exact: true });
   await expect(editor.getByLabel(/^HOME/)).toHaveValue("");
   await expect(editor.getByLabel(/^Accountable owner/)).toHaveValue("");
-  await editor.getByLabel("Delivery roles", { exact: true }).fill("Engineer Lead");
+  await editor.getByRole("button", { name: "Remove Engineer from roles", exact: true }).click();
+  await editor.getByLabel("Search or add roles", { exact: true }).fill("Engineer Lead");
+  await editor.getByLabel("Search or add roles", { exact: true }).press("Enter");
   await editor.getByRole("button", { name: "Save person", exact: true }).click();
   await expect(editor).toHaveCount(0);
   await expect(row).toContainText("Engineer Lead");
@@ -359,8 +362,12 @@ test("adding the first teammate retries a lost practice acknowledgment without c
   await dialog.getByLabel("Full name", { exact: true }).fill("New teammate");
   await dialog.getByLabel(/^HOME \/ practice/).selectOption("new");
   await dialog.getByLabel("Practice name", { exact: true }).fill("Engineering");
-  await dialog.getByLabel(/^Delivery roles/).fill("Data engineer");
-  await dialog.getByLabel(/^Skills/).fill("SQL, Python");
+  await dialog.getByLabel("Search or add roles", { exact: true }).fill("Data engineer");
+  await dialog.getByLabel("Search or add roles", { exact: true }).press("Enter");
+  for (const skill of ["SQL", "Python"]) {
+    await dialog.getByLabel("Search or add skills", { exact: true }).fill(skill);
+    await dialog.getByLabel("Search or add skills", { exact: true }).press("Enter");
+  }
   state.loseNextAcknowledgment = true;
   await dialog.getByRole("button", { name: "Add to the workspace", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("connection was interrupted");
@@ -382,7 +389,8 @@ test("a Studio teammate needs no practice or owner to be matched and selected", 
   await page.getByRole("button", { name: "Add a teammate", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Add a teammate.", exact: true });
   await dialog.getByLabel("Full name", { exact: true }).fill("Independent engineer");
-  await dialog.getByLabel(/^Delivery roles/).fill("Data engineer");
+  await dialog.getByLabel("Search or add roles", { exact: true }).fill("Data engineer");
+  await dialog.getByLabel("Search or add roles", { exact: true }).press("Enter");
   await dialog.getByRole("button", { name: "Add to the workspace", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   expect(state.store.data.resources).toHaveLength(1);

@@ -1,0 +1,47 @@
+.capability-role{--capability-ink:#3154bc;--capability-tint:#edf2ff;--capability-edge:#cbd8fb}
+.capability-skill{--capability-ink:#a64f24;--capability-tint:#fff2e9;--capability-edge:#f0d2be}
+.capability-type-picker{min-width:0;border:0;padding:0;margin:0}
+.capability-type-picker>legend{font-size:12px;color:#405778;font-weight:550;margin-bottom:10px}
+.capability-type-picker>div{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.capability-type-choice{display:flex;align-items:center;gap:11px;min-height:77px;padding:15px;text-align:left;background:#fff;border:1px solid #d7e0ee;border-radius:8px;color:#596b86}
+.capability-type-choice>svg{flex-shrink:0;color:var(--capability-ink)}
+.capability-type-choice>span{display:flex;flex:1;flex-direction:column;gap:5px;min-width:0}
+.capability-type-choice strong{font-size:13px;font-weight:600;color:#273955}
+.capability-type-choice small{font-size:10px;line-height:1.5;font-weight:400}
+.capability-type-choice[aria-pressed=true]{border-color:var(--capability-edge);background:var(--capability-tint);box-shadow:inset 0 0 0 1px var(--capability-edge)}
+.capability-type-choice:disabled[aria-pressed=false]{display:none}
+.capability-type-picker:has(.capability-type-choice:disabled)>div{grid-template-columns:1fr}
+.capability-multiselect{padding:17px;border:1px solid var(--capability-edge);border-radius:9px;background:#fff;min-width:0}
+.capability-multiselect>header{display:flex;gap:10px;align-items:center;margin-bottom:13px}
+.capability-field-icon{display:grid;place-items:center;flex-shrink:0;width:36px;height:36px;border-radius:9px;background:var(--capability-tint);color:var(--capability-ink)}
+.capability-multiselect>header>div{min-width:0;flex:1}
+.capability-multiselect h4{font-size:14px;font-weight:650;color:#263953;margin:0}
+.capability-multiselect header p{font-size:10px;line-height:1.7;color:#65758d;margin:3px 0 0}
+.capability-selection-count{font-size:10px;white-space:nowrap;align-self:start;padding-top:3px;color:var(--capability-ink)}
+.capability-selected{display:flex;flex-wrap:wrap;gap:7px;padding:0;margin:0 0 13px;list-style:none}
+.capability-selected>li{display:flex;align-items:center;gap:6px;max-width:100%;background:var(--capability-tint);border:1px solid var(--capability-edge);border-radius:6px;padding-left:9px;min-height:34px;color:var(--capability-ink);font-size:11px;line-height:1.6}
+.capability-selected>li>svg{flex-shrink:0}
+.capability-selected>li>span{overflow-wrap:anywhere}
+.capability-selected button{display:grid;place-items:center;align-self:stretch;flex-shrink:0;min-width:32px;border:0;border-radius:0 5px 5px 0;background:transparent;color:inherit}
+.capability-selected button:hover{background:var(--capability-edge)}
+.capability-multiselect .capability-search{position:relative;display:block}
+.capability-search>svg{position:absolute;top:15px;left:12px;color:#75849c;pointer-events:none}
+.admin-form .capability-search>input,.ts-person-dialog .capability-search>input{padding-left:37px;background:#fbfcfe;min-height:44px;font-size:12px}
+.capability-options{display:flex;flex-wrap:wrap;gap:6px;max-height:164px;overflow:auto;scrollbar-width:thin;overscroll-behavior:contain;margin-top:10px;padding:2px}
+.capability-options:empty{display:none}
+.capability-options>button{display:flex;align-items:center;gap:5px;max-width:100%;min-height:34px;font-size:11px;line-height:1.5;padding:7px 9px;background:#fff;border:1px solid #dbe3ed;border-radius:5px;color:#526580;text-align:left}
+.capability-options>button>svg{flex-shrink:0}
+.capability-options>button>span{overflow-wrap:anywhere}
+.capability-options>button[aria-pressed=true]{color:var(--capability-ink);background:var(--capability-tint);border-color:var(--capability-edge)}
+.capability-options>button:hover{border-color:var(--capability-ink)}
+.capability-options>button:disabled{opacity:.5}
+.capability-add-value{display:flex;align-items:center;gap:6px;padding:8px 10px;margin-top:9px;min-height:36px;max-width:100%;background:var(--capability-tint);color:var(--capability-ink);border:1px dashed var(--capability-edge);border-radius:5px;font-size:11px;line-height:1.5;text-align:left;overflow-wrap:anywhere}
+.capability-add-value>svg{flex-shrink:0}
+.capability-add-value>small{font-size:9px;margin-left:4px;color:#697a92}
+.capability-input-hint{font-size:10px;line-height:1.7;color:#687b98;margin:9px 0 0}
+.capability-input-warning{color:#a84b29;background:#fff5ef;border-radius:5px;padding:8px 10px;margin-bottom:9px}
+.capability-announcement{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.capability-multiselect button:focus-visible,.capability-type-choice:focus-visible{outline:2px solid var(--capability-ink);outline-offset:3px}
+.eng-catalog-choices.capability-role>summary,.eng-catalog-choices.capability-skill>summary{color:var(--capability-ink);background:var(--capability-tint)}
+.eng-catalog-choices.capability-role button[aria-pressed=true],.eng-catalog-choices.capability-skill button[aria-pressed=true]{color:var(--capability-ink);background:var(--capability-tint);border-color:var(--capability-edge)}
+@media(max-width:650px){.capability-type-picker>div{gap:7px}.capability-type-choice{padding:11px;gap:8px;align-items:start;flex-wrap:wrap}.capability-type-choice>svg{width:18px;height:18px}.capability-type-choice>span{flex-basis:calc(100% - 30px)}.capability-type-choice>svg:last-child:not(:first-child){display:none}.capability-type-choice strong{font-size:12px}.capability-type-choice small{font-size:9px}.capability-multiselect{padding:13px}.capability-multiselect>header{flex-wrap:wrap;gap:8px}.capability-multiselect>header>div{flex-basis:calc(100% - 44px)}.capability-selection-count{margin-left:44px;margin-top:-7px}.capability-multiselect h4{font-size:13px}.capability-multiselect header p{font-size:10px}.admin-form .capability-search>input,.ts-person-dialog .capability-search>input{font-size:16px}.capability-options{max-height:180px}.capability-options>button{min-height:42px}.capability-selected>li{min-height:40px}.capability-selected button{min-width:38px}.capability-add-value{min-height:42px;flex-wrap:wrap}}

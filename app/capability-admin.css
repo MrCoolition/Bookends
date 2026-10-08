@@ -1,0 +1,13 @@
+.admin-capability-toolbar{flex-wrap:wrap;gap:10px}
+.admin-capability-toolbar .admin-search{flex:1;min-width:150px;max-width:300px}
+.admin-capability-filter{display:inline-flex;align-items:center;gap:3px;padding:3px;border:1px solid #dce4ee;border-radius:8px;background:#f2f5fa}
+.admin-capability-filter button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border:0;border-radius:5px;padding:8px 11px;background:transparent;color:#5a6e8b;font-size:11px;cursor:pointer}
+.admin-capability-filter button[aria-pressed=true]{background:#fff;box-shadow:0 1px 4px #253c661c;color:#315be3}
+.admin-capability-filter button:last-child[aria-pressed=true]{color:#ad542f}
+.admin-capability-filter button:focus-visible{outline:3px solid #819bff;outline-offset:2px}
+.admin-record[data-capability-kind=role] .admin-record-mark{background:#ebf0ff;color:#315be3}
+.admin-record[data-capability-kind=skill] .admin-record-mark{background:#fff0e7;color:#ad542f}
+.admin-record[data-capability-kind=role] .admin-record-name>span{color:#315be3}
+.admin-record[data-capability-kind=skill] .admin-record-name>span{color:#ad542f}
+.admin-record[data-capability-kind].is-inactive .admin-record-mark{opacity:.55}
+@media(max-width:650px){.admin-capability-toolbar .admin-search{flex-basis:100%;max-width:none}.admin-capability-filter{order:2}.admin-capability-filter button{min-height:40px;padding-inline:10px}.admin-capability-toolbar>span{order:3}.admin-capability-toolbar>.admin-archive-toggle{order:4}.admin-capability-toolbar>.admin-refresh{order:1}}

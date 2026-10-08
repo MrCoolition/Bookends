@@ -9,6 +9,7 @@ import { summarizePlannedTeam } from "@/lib/studio/team";
 import { parseNamedList, formatNamedList } from "@/lib/admin/named-list";
 import type { SowIntakeResult } from "@/lib/ai/contracts";
 import { SowIntakePanel } from "./sow-intake-panel";
+import { CapabilityMultiSelect } from "./capability-editor";
 
 type Props = { data: AdminBootstrap; save: (command: LocalAdminCommand) => Promise<AdminBootstrap>; refresh: () => Promise<AdminBootstrap>; onSignOut?: () => void };
 type Draft = { name: string; clientId: string; plan: EngagementPlan };
@@ -215,13 +216,11 @@ function ReviewDialog({ draft, clientName, data, busy, error, onClose, onSave, o
 function AddPerson({ data, save, onClose }: { data: AdminBootstrap; save: Props["save"]; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null), lock = useRef(false);
   const pendingHome = useRef<{ name: string; code: string } | null>(null);
-  const [name, setName] = useState(""), [home, setHome] = useState(""), [newHome, setNewHome] = useState(""), [roles, setRoles] = useState(""), [skills, setSkills] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
+  const [name, setName] = useState(""), [home, setHome] = useState(""), [newHome, setNewHome] = useState(""), [roles, setRoles] = useState<string[]>([]), [skills, setSkills] = useState<string[]>([]), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const homes = data.homes.filter(item => item.active);
   useEffect(() => { ref.current?.showModal(); return () => ref.current?.close(); }, []);
   async function submit(event: FormEvent) {
     event.preventDefault(); if (lock.current) return;
-    const roleList = parseNamedList(roles), skillList = parseNamedList(skills);
-    if (roleList.error || skillList.error) { setError(roleList.error || skillList.error || "Check the profile."); return; }
     if (home === "new" && !newHome.trim()) { setError("Name the practice you want to add."); return; }
     lock.current = true; setBusy(true); setError("");
     try {
@@ -231,8 +230,8 @@ function AddPerson({ data, save, onClose }: { data: AdminBootstrap; save: Props[
         if (existing) homeCode = existing.code;
         else { if (pendingHome.current?.name !== newHome.trim()) pendingHome.current = { name: newHome.trim(), code: `HOME-${crypto.randomUUID().slice(0, 8).toUpperCase()}` }; const code = pendingHome.current!.code; await save({ type: "save_home", code, name: newHome.trim(), description: "" }); homeCode = code; setHome(code); }
       }
-      await save({ type: "save_resource", name: name.trim(), home: homeCode, ownerId: "", profile: { roles: roleList.values, skills: skillList.values } }); onClose();
+      await save({ type: "save_resource", name: name.trim(), home: homeCode, ownerId: "", profile: { roles, skills } }); onClose();
     } catch (cause) { setError(cleanError(cause)); } finally { setBusy(false); lock.current = false; }
   }
-  return <dialog ref={ref} className="ts-dialog ts-person-dialog" aria-labelledby="ts-person-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><div className="ts-dialog-header"><p className="ts-eyebrow">MAKE ROOM FOR SOMEONE GREAT</p><button className="ts-icon-button" aria-label="Close add teammate" disabled={busy} onClick={onClose}><X size={20}/></button></div><h2 id="ts-person-title">Add a teammate.</h2><p>Save their profile, then choose where they fit on your board.</p><form onSubmit={submit}><label>Full name<input autoFocus required maxLength={160} value={name} onChange={event => setName(event.target.value)}/></label><label>HOME / practice <small>Optional</small><select value={home} onChange={event => setHome(event.target.value)}><option value="">No HOME assigned</option>{homes.map(item => <option value={item.code} key={item.id}>{item.name}</option>)}<option value="new">+ Add a practice</option></select></label>{home === "new" && <label>Practice name<input required maxLength={160} placeholder="e.g. Engineering" value={newHome} onChange={event => setNewHome(event.target.value)}/></label>}<label>Delivery roles <small>Optional · comma separated</small><input value={roles} list="ts-role-catalog" placeholder="e.g. Full-stack developer" onChange={event => setRoles(event.target.value)}/></label><label>Skills <small>Optional · comma separated</small><input value={skills} list="ts-skill-catalog" placeholder="e.g. React, TypeScript" onChange={event => setSkills(event.target.value)}/></label>{error && <p className="ts-inline-error" role="alert">{error}</p>}<button className="ts-primary ts-wide" disabled={busy}>{busy ? "Adding teammate…" : "Add to the workspace"}<Plus size={18}/></button></form></dialog>;
+  return <dialog ref={ref} className="ts-dialog ts-person-dialog" aria-labelledby="ts-person-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><div className="ts-dialog-header"><p className="ts-eyebrow">MAKE ROOM FOR SOMEONE GREAT</p><button className="ts-icon-button" aria-label="Close add teammate" disabled={busy} onClick={onClose}><X size={20}/></button></div><h2 id="ts-person-title">Add a teammate.</h2><p>Save their profile, then choose where they fit on your board.</p><form onSubmit={submit}><label>Full name<input autoFocus required maxLength={160} value={name} onChange={event => setName(event.target.value)}/></label><label>HOME / practice <small>Optional</small><select value={home} onChange={event => setHome(event.target.value)}><option value="">No HOME assigned</option>{homes.map(item => <option value={item.code} key={item.id}>{item.name}</option>)}<option value="new">+ Add a practice</option></select></label>{home === "new" && <label>Practice name<input required maxLength={160} placeholder="e.g. Engineering" value={newHome} onChange={event => setNewHome(event.target.value)}/></label>}<CapabilityMultiSelect kind="role" entries={data.capabilities || []} value={roles} onChange={setRoles}/><CapabilityMultiSelect kind="skill" entries={data.capabilities || []} value={skills} onChange={setSkills}/>{error && <p className="ts-inline-error" role="alert">{error}</p>}<button className="ts-primary ts-wide" disabled={busy}>{busy ? "Adding teammate…" : "Add to the workspace"}<Plus size={18}/></button></form></dialog>;
 }
