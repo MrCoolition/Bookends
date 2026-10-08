@@ -163,8 +163,9 @@ function addPeople(state: { store: LocalAdminStore }) {
   state.store = applyLocalAdminCommand(state.store, { type: "save_home", code: "ENG", name: "Engineering", description: "" });
   for (const person of [{ name: "Alex Rivers", roles: ["Data engineer"], skills: ["SQL", "Python"] }, { name: "Blair Chen", roles: ["Full-stack developer"], skills: ["React", "TypeScript"] }, { name: "Chris Bell", roles: ["Data engineer"], skills: ["SQL"] }]) state.store = applyLocalAdminCommand(state.store, { type: "save_resource", name: person.name, home: "ENG", ownerId: LOCAL_ADMIN_OWNER_ID, profile: { roles: person.roles, skills: person.skills } });
 }
-async function directBoard(page: Page) {
+async function directBoard(page: Page, captureLobby = false, selectAlex = true) {
   await page.goto("/studio");
+  if (captureLobby) { await expect(page.getByRole("button", { name: /Build it myself/ })).toBeVisible(); await page.screenshot({ path: "artifacts/team-studio-lobby-desktop.png", fullPage: true }); }
   await page.getByRole("button", { name: /Build it myself/ }).click();
   await page.getByRole("combobox", { name: "Who’s the client?", exact: true }).selectOption({ label: "Shared Test Client" });
   await page.getByLabel("Engagement / workstream name", { exact: true }).fill("Customer platform build");
@@ -175,12 +176,12 @@ async function directBoard(page: Page) {
   await page.getByRole("button", { name: "Add the first role", exact: true }).click();
   await page.getByLabel("Delivery role", { exact: true }).fill("Data engineer");
   await page.getByRole("button", { name: "Add", exact: true }).click();
-  await page.getByRole("button", { name: "Select Alex Rivers for Data engineer", exact: true }).click();
+  if (selectAlex) await page.getByRole("button", { name: "Select Alex Rivers for Data engineer", exact: true }).click();
 }
 
 test("a known team becomes a direct client plan without an SOW and survives reload", async ({ page }) => {
   const state = await mockWorkspace(page); addPeople(state);
-  await directBoard(page);
+  await directBoard(page, true);
   await page.getByRole("button", { name: "Select Chris Bell for Data engineer", exact: true }).click();
   await expect(page.locator(".ts-error")).toContainText("All 1 Data engineer positions");
   await expect(page.locator(".ts-position-filled")).toHaveCount(1);
@@ -243,4 +244,96 @@ test("unlock, shared admin, and direct team board remain usable at 390 pixels", 
   await page.screenshot({ path: "artifacts/team-studio-known-team-mobile.png", fullPage: true });
   await page.getByRole("button", { name: "Review team plan", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "Customer platform build", exact: true }).getByRole("button", { name: "Save team plan", exact: true })).toBeVisible();
+});
+
+test("a team creation acknowledged after retry remains the same engagement on subsequent edit", async ({ page }) => {
+  const state = await mockWorkspace(page); addPeople(state);
+  await directBoard(page);
+  await page.getByRole("button", { name: "Review team plan", exact: true }).click();
+  const review = page.getByRole("dialog", { name: "Customer platform build", exact: true });
+  state.loseNextAcknowledgment = true;
+  await review.getByRole("button", { name: "Save team plan", exact: true }).click();
+  await expect(review.getByRole("alert")).toContainText("connection was interrupted");
+  await review.getByRole("button", { name: "Refresh saved records", exact: true }).click();
+  await review.getByRole("button", { name: "Save team plan", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  expect(state.store.data.missions).toHaveLength(1);
+  const id = state.store.data.missions[0].id;
+  await expect(page).toHaveURL(new RegExp(`engagement=${id}$`));
+  await page.getByRole("spinbutton", { name: "Data engineer allocation", exact: true }).fill("60");
+  await page.getByRole("button", { name: "Review team plan", exact: true }).click();
+  await review.getByRole("button", { name: "Save team plan", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  expect(state.store.data.missions).toHaveLength(1);
+  expect(state.store.data.missions[0].id).toBe(id);
+  expect(state.store.data.missions[0].revision).toBe(2);
+  expect(state.store.data.missions[0].engagement!.roles[0].allocationPercent).toBe(60);
+  expect(state.writes).toEqual(["POST", "POST"]);
+});
+
+test("edited team conflicts require reviewing the saved version before keeping a draft", async ({ page }) => {
+  const state = await mockWorkspace(page); addPeople(state);
+  await directBoard(page);
+  await page.getByRole("button", { name: "Review team plan", exact: true }).click();
+  const review = page.getByRole("dialog", { name: "Customer platform build", exact: true });
+  await review.getByRole("button", { name: "Save team plan", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  await page.getByRole("spinbutton", { name: "Data engineer allocation", exact: true }).fill("50");
+  const mission = state.store.data.missions[0];
+  state.store = applyLocalAdminCommand(state.store, { type: "save_mission", id: mission.id, expectedRevision: mission.revision, name: mission.name, clientId: mission.clientId, engagement: { ...mission.engagement!, outcomes: "Another planner updated the delivery outcome." } });
+  await page.getByRole("button", { name: "Review team plan", exact: true }).click();
+  await review.getByRole("button", { name: "Save team plan", exact: true }).click();
+  await expect(review.getByRole("alert")).toContainText("workspace changed");
+  await review.getByRole("button", { name: "Refresh saved records", exact: true }).click();
+  await expect(review).toContainText("Another planner updated the delivery outcome.");
+  await expect(review.getByRole("button", { name: "Save team plan", exact: true })).toBeDisabled();
+  await review.getByRole("button", { name: "Keep my draft instead", exact: true }).click();
+  await review.getByRole("button", { name: "Save team plan", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  expect(state.store.data.missions).toHaveLength(1);
+  expect(state.store.data.missions[0].revision).toBe(3);
+  expect(state.store.data.missions[0].engagement!.roles[0].allocationPercent).toBe(50);
+});
+
+test("malformed skill text blocks team save until the visible input is corrected", async ({ page }) => {
+  const state = await mockWorkspace(page); addPeople(state);
+  await directBoard(page);
+  await page.getByRole("button", { name: "Edit Data engineer", exact: true }).click();
+  const skills = page.locator(".ts-role-details").getByLabel(/^Skills/);
+  await skills.fill('"Unclosed skill');
+  await page.getByRole("button", { name: "Review team plan", exact: true }).click();
+  const review = page.getByRole("dialog", { name: "Customer platform build", exact: true });
+  await review.getByRole("button", { name: "Save team plan", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  await expect(page.locator(".ts-error")).toContainText("Data engineer");
+  expect(state.writes).toEqual([]);
+  await expect(skills).toHaveValue('"Unclosed skill');
+  await skills.fill('"Cloud (AWS, Azure)", SQL');
+  await page.getByRole("button", { name: "Review team plan", exact: true }).click();
+  await review.getByRole("button", { name: "Save team plan", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  expect(state.store.data.missions[0].engagement!.roles[0].skills).toEqual(["Cloud (AWS, Azure)", "SQL"]);
+});
+
+test("adding the first teammate retries a lost practice acknowledgment without creating duplicate practices", async ({ page }) => {
+  const state = await mockWorkspace(page);
+  await directBoard(page, false, false);
+  await page.getByRole("button", { name: "Add a teammate", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Add a teammate.", exact: true });
+  await dialog.getByLabel("Full name", { exact: true }).fill("New teammate");
+  await dialog.getByLabel("Practice name", { exact: true }).fill("Engineering");
+  await dialog.getByLabel(/^Delivery roles/).fill("Data engineer");
+  await dialog.getByLabel(/^Skills/).fill("SQL, Python");
+  state.loseNextAcknowledgment = true;
+  await dialog.getByRole("button", { name: "Add to the workspace", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("connection was interrupted");
+  await expect(dialog.getByLabel("Full name", { exact: true })).toHaveValue("New teammate");
+  await dialog.getByRole("button", { name: "Add to the workspace", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(state.store.data.homes).toHaveLength(1);
+  expect(state.store.data.resources).toHaveLength(1);
+  expect(state.requestKeys[0]).toBe(state.requestKeys[1]);
+  expect(state.writes).toEqual(["POST", "POST"]);
+  await page.getByRole("button", { name: "Select New teammate for Data engineer", exact: true }).click();
+  await expect(page.locator(".ts-position-filled")).toContainText("New teammate");
 });

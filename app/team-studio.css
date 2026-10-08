@@ -13,3 +13,4 @@
 
 .ts-review-recovery{padding:15px;background:#fff5ed;border-radius:9px;margin:15px 0;font-size:11px;line-height:1.8}.ts-review-recovery button{margin:6px 8px 0 0}.ts-review-recovery p{margin:8px 0}.ts-app h1,.ts-app h2,.ts-review-intro h2{font-family:"Space Grotesk Variable",sans-serif}
 .ts-app .ts-search{flex-direction:row}.ts-app .ts-primary:disabled{transform:none}.ts-app .ts-people-list{scrollbar-width:thin}
+.ts-coverage .ts-coverage-ring>span{font-size:25px;color:var(--ts-ink)}

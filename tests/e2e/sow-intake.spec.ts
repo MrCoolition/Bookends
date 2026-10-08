@@ -123,11 +123,11 @@ test("file validation, provider errors, and stopping a request preserve the inpu
   });
   await openReader(page);
   await page.getByLabel("Choose SOW document", { exact: true }).setInputFiles({ name: "large.pdf", mimeType: "application/pdf", buffer: Buffer.alloc(3 * 1024 * 1024 + 1) });
-  await expect(page.getByRole("alert")).toContainText("Keep it under 3 MB"); expect(posts).toBe(0);
+  await expect(page.locator(".sow-panel").getByRole("alert")).toContainText("Keep it under 3 MB"); expect(posts).toBe(0);
   await page.getByRole("button", { name: "Paste a brief", exact: true }).click();
   await page.getByLabel("Paste the SOW or workstream brief").fill(brief);
   await page.getByRole("button", { name: "Bring the plan to life" }).click();
-  await expect(page.getByRole("alert")).toContainText("SOW reading is busy");
+  await expect(page.locator(".sow-panel").getByRole("alert")).toContainText("SOW reading is busy");
   await expect(page.getByLabel("Paste the SOW or workstream brief")).toHaveValue(brief);
   await page.getByRole("button", { name: "Bring the plan to life" }).click();
   await expect(page.getByText("Reading your brief…", { exact: true })).toBeVisible();
@@ -156,4 +156,3 @@ test("intake is legible and keyboard accessible on desktop and a 320px phone", a
   await page.getByRole("button", { name: "Bring the plan to life" }).focus(); await page.keyboard.press("Enter");
   await expect(page.getByLabel("Engagement / workstream name")).toHaveValue("Customer data platform");
 });
-

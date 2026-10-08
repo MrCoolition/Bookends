@@ -20,7 +20,7 @@ Required deployment settings:
 
 Run `npx tsx scripts/create-workspace-secrets.ts` to generate a random passcode, its hash, and a session secret in the ignored `.tmp/shared-workspace-secrets.json` file. The script refuses to overwrite existing credentials and prints only the path. Keep the file private and share only the passcode with intended workspace users. Never expose any of these settings through `NEXT_PUBLIC_` variables.
 
-The temporary `/api/shared/setup` activation route is available only with `BOOKENDS_SETUP_ENABLED=1`, a separate generated `BOOKENDS_SETUP_TOKEN`, and `BOOKENDS_SETUP_RUNTIME_PASSWORD`. It uses the existing server-side Neon integration credential to apply only checked-in, checksum-verified migrations and create the fixed restricted runtime login. It never accepts request SQL or returns credentials. Disable those setup settings and remove the activation route after successful provisioning. They are not needed for normal use.
+Initial activation used a separately protected, temporary operator endpoint to apply the reviewed migrations and provision the restricted runtime login. That HTTP route was removed after provisioning; it is not part of the running application. Future migrations use the reviewed migration runner with a separate operator connection. Normal requests use only the restricted runtime credential.
 
 ## Saving and recovery
 
