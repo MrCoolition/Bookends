@@ -10,6 +10,7 @@ import { consumeBudget, loadSharedStore, saveSharedStore } from "../lib/shared/s
 import { checkSharedMutationOrigin } from "../lib/shared/http";
 import type { OperationsQuery } from "../lib/operations/service";
 import { applyLocalAdminCommand } from "../lib/admin/local";
+import { emptyForecast } from "../lib/forecast/types";
 
 const env = { BOOKENDS_ADMIN_MODE: "shared", BOOKENDS_ENV: "production", BOOKENDS_WORKSPACE_ORIGIN: "https://bookends.example", BOOKENDS_WORKSPACE_SESSION_SECRET: "fixture-secret-at-least-32-characters", BOOKENDS_WORKSPACE_PASSCODE_HASH: `scrypt$32768$8$1$${"a".repeat(32)}$${"b".repeat(64)}` };
 const config = sharedConfiguration(env), session = { workspaceId: "main", sessionId: "a".repeat(64) };
@@ -161,4 +162,38 @@ test("acknowledged retry after a lost response never creates a duplicate, and re
   const replaced = await scoped("main", query => saveSharedStore(query, session, snapshot, "snapshot"));
   assert.deepEqual(await scoped("main", query => saveSharedStore(query, session, snapshot, "snapshot")), replaced);
   await assert.rejects(scoped("main", query => saveSharedStore(query, session, { ...snapshot, store: { ...saved, data: { ...saved.data, organization: { ...saved.data.organization, name: "Changed" } } } }, "snapshot")), status(409));
+});
+
+test("potential SOWs and forecast scenarios persist together without changing source demand, and reject stale or foreign references", async () => {
+  const workspaceId = "forecast-test", forecastSession = { ...session, workspaceId };
+  let current = await scoped(workspaceId, query => loadSharedStore(query, workspaceId));
+  const mutate = async (command: unknown) => {
+    current = await scoped(workspaceId, query => saveSharedStore(query, forecastSession, { expectedRevision: current.revision, idempotencyKey: randomUUID(), command }, "command"));
+    return current;
+  };
+  await mutate({ type: "save_resource", name: "Forecast teammate", home: "", ownerId: "", profile: { roles: ["Data Engineer"], skills: ["SQL"] } });
+  await mutate({ type: "save_mission", name: "Potential platform", clientId: current.data.clients[0].id, engagement: {
+    version: 1, source: "sow", status: "draft", sowReference: "", signedOn: null, start: "2027-01-01", end: "2027-06-30", outcomes: "Potential platform delivery",
+    pipeline: { stage: "proposal", confidence: 65, expectedClose: "2026-12-15" },
+    roles: [{ id: randomUUID(), name: "Data Engineer", headcount: 2, allocationPercent: 100, skills: ["SQL"], responsibilities: "Build pipelines", start: "2027-01-01", end: "2027-06-30", selectedResourceIds: [] }],
+  } });
+  const sourceMission = structuredClone(current.data.missions[0]), person = current.data.resources[0];
+  const forecast = emptyForecast();
+  forecast.capacities = [{ resourceId: person.id, allocationPercent: 80, availableFrom: "2027-01-01", availableUntil: null, notes: "Explicit planning capacity" }];
+  forecast.commitments = [{ id: randomUUID(), resourceId: person.id, missionId: null, name: "Other client work", allocationPercent: 40, start: "2027-01-01", end: "2027-03-31" }];
+  forecast.scenarios = [{ id: randomUUID(), name: "Growth case", hiringLeadWeeks: 8, selections: [{ missionId: sourceMission.id, included: true, shiftDays: 90, teamScale: 1.5 }] }];
+  const beforeRevision = current.revision;
+  await mutate({ type: "save_forecast", expectedRevision: 0, forecast });
+  const reloaded = await scoped(workspaceId, query => loadSharedStore(query, workspaceId));
+  assert.deepEqual(reloaded, current);
+  assert.equal(reloaded.revision, beforeRevision + 1);
+  assert.deepEqual(reloaded.data.forecast, { ...forecast, revision: 1 });
+  assert.deepEqual(reloaded.data.missions[0], sourceMission, "Hypothetical shifts and scaling must not edit the potential SOW.");
+  await assert.rejects(mutate({ type: "save_forecast", expectedRevision: 0, forecast }), /forecast changed/);
+  const broken = structuredClone(current.data.forecast!);
+  broken.capacities[0].resourceId = randomUUID();
+  await assert.rejects(mutate({ type: "save_forecast", expectedRevision: 1, forecast: broken }), /saved teammate/);
+  assert.deepEqual(await scoped(workspaceId, query => loadSharedStore(query, workspaceId)), reloaded);
+  const events = await scoped(workspaceId, query => query.query<{ action: string }>("SELECT action FROM be_shared_audit ORDER BY revision"));
+  assert.deepEqual(events.rows.map(row => row.action), ["save_resource", "save_mission", "save_forecast"]);
 });

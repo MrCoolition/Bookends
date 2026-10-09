@@ -63,6 +63,8 @@ export const engagementPlanSchema = z.object({
   signedOn: date.nullable(), start: date, end: date, outcomes: text(4000, false),
   /** Omission preserves the original SOW-backed interpretation of existing plans. */
   source: z.enum(["direct", "sow"]).optional(),
+  /** A potential agreement, kept distinct from signed baseline work. */
+  pipeline: z.object({ stage: z.enum(["exploring", "qualified", "proposal", "negotiation", "lost"]), confidence: z.number().finite().min(0).max(100), expectedClose: date.nullable() }).strict().optional(),
   intake: z.object({
     sourceName: text(255), sourceKind: z.enum(["pdf", "docx", "text"]),
     evidence: z.array(z.object({ field: text(120), quote: text(600), verified: z.boolean() }).strict()).max(220),
@@ -70,6 +72,7 @@ export const engagementPlanSchema = z.object({
   }).strict().optional(),
   roles: z.array(engagementRoleSchema).min(1, "Add at least one delivery role to the team.").max(100),
 }).strict().superRefine((plan, ctx) => {
+  if (plan.pipeline && (plan.source === "direct" || plan.status !== "draft")) ctx.addIssue({ code: "custom", path: ["pipeline"], message: "Pipeline details apply only to draft SOWs. Remove them when an agreement is signed or completed." });
   if (isEngagementDate(plan.start) && isEngagementDate(plan.end)) {
     const windowError = engagementWindowError(plan.start, plan.end);
     if (windowError) ctx.addIssue({ code: "custom", path: ["end"], message: windowError });

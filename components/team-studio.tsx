@@ -1,5 +1,7 @@
 "use client";
 
+import { byName } from "@/lib/alphabetical";
+
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ArrowDownToLine, ArrowLeft, ArrowRight, CalendarDays, Check, CheckCheck, ChevronRight, CircleHelp, FileText, Flag, Layers3, LogOut, Plus, Search, Settings2, Sparkles, Trash2, Undo2, UsersRound, X } from "lucide-react";
 import type { AdminBootstrap, AdminMission, AdminResource } from "@/lib/admin/contracts";
@@ -20,55 +22,34 @@ const day = (value: string) => Date.parse(`${value}T00:00:00Z`) / 86400000;
 const emptyRole = (plan: EngagementPlan, name = ""): EngagementRole => ({ id: crypto.randomUUID(), name, headcount: 1, allocationPercent: 100, skills: [], responsibilities: "", start: plan.start, end: plan.end, selectedResourceIds: [] });
 const cleanError = (error: unknown) => error instanceof Error ? error.message : "That change couldn’t be saved. Your draft is still here.";
 
+type TilePoint = readonly [number, number];
+// Four complementary shapes partition a 4×4 square exactly. Shared coordinates
+// keep every joint flush; the pieces finish in place instead of floating apart.
+const ASSEMBLY_TILES = [
+  { name: "cobalt", top: "#3658F5", side: "#233EB8", points: [[0,0],[3,0],[3,1],[1,1],[1,2],[0,2]], edges: [] },
+  { name: "coral", top: "#F18B70", side: "#C85C42", points: [[3,0],[4,0],[4,3],[3,3],[3,2],[2,2],[2,1],[3,1]], edges: [[[4,0],[4,3]]] },
+  { name: "ink", top: "#273658", side: "#17223D", points: [[1,1],[2,1],[2,3],[1,3],[1,4],[0,4],[0,2],[1,2]], edges: [[[1,4],[0,4]]] },
+  { name: "lilac", top: "#B5C4FF", side: "#7E94DD", points: [[2,2],[3,2],[3,3],[4,3],[4,4],[1,4],[1,3],[2,3]], edges: [[[4,3],[4,4]],[[4,4],[1,4]]] },
+] as const;
+const tilePoint = ([x,y]: TilePoint, depth = 0) => `${280 + (x-y)*50},${70 + (x+y)*27 + depth}`;
 function TeamAssemblyArt() {
-  return <div className="ts-hero-art" aria-hidden="true">
+  return <div className="ts-hero-art ts-joined-art" aria-hidden="true">
     <div className="ts-assembly-caption"><span>INDIVIDUAL STRENGTHS.</span><strong>One powerful team.</strong></div>
-    <svg className="ts-assembly" viewBox="0 0 560 350" fill="none" focusable="false">
-      <defs>
-        <filter id="ts-assembly-shadow" x="-30%" y="-50%" width="160%" height="200%"><feGaussianBlur stdDeviation="13"/></filter>
-      </defs>
-      <path d="M89 224 279 123 481 229 290 330Z" fill="#222F68" opacity=".1" filter="url(#ts-assembly-shadow)"/>
-      <g stroke="#CFD4E2" strokeWidth="1">
-        <path d="m54 192 220-116 233 123M54 215l233 123 220-117"/>
-        <path d="m49 189 10 5m210-121 10 6m223 117 10 5M49 212l10 6m223 117 10 5m210-122 10 6"/>
-      </g>
-      <g className="ts-assembly-piece ts-assembly-back" transform="translate(0 -4)">
-        <polygon points="424,142 376,167 376,197 424,172" fill="#1B38C7"/>
-        <polygon points="376,167 280,117 280,147 376,197" fill="#2446DB"/>
-        <polygon points="280,117 232,142 232,172 280,147" fill="#1B38C7"/>
-        <polygon points="232,142 184,117 184,147 232,172" fill="#2446DB"/>
-        <polygon points="280,67 424,142 376,167 280,117 232,142 184,117" fill="#3156F4" stroke="#FFFFFF" strokeOpacity=".24" strokeWidth="1" strokeLinejoin="round"/>
-        <path d="m280 83 21 11-21 11-21-11Z" stroke="#B4C3FF" strokeWidth="2"/>
-      </g>
-      <g className="ts-assembly-piece ts-assembly-middle" transform="translate(0 0)">
-        <polygon points="376,167 328,192 328,222 376,197" fill="#8499E9"/>
-        <polygon points="328,192 280,167 280,197 328,222" fill="#9DAFF3"/>
-        <polygon points="280,167 232,192 232,222 280,197" fill="#8499E9"/>
-        <polygon points="232,192 184,167 184,197 232,222" fill="#9DAFF3"/>
-        <polygon points="280,117 376,167 328,192 280,167 232,192 184,167" fill="#BBC8FF" stroke="#FFFFFF" strokeOpacity=".24" strokeWidth="1" strokeLinejoin="round"/>
-      </g>
-      <g className="ts-assembly-piece ts-assembly-coral" transform="translate(9 -15)">
-        <polygon points="472,167 328,242 328,272 472,197" fill="#CE583E"/>
-        <polygon points="328,242 280,217 280,247 328,272" fill="#DE694C"/>
-        <polygon points="424,142 472,167 328,242 280,217" fill="#F48A70" stroke="#FFFFFF" strokeOpacity=".24" strokeWidth="1" strokeLinejoin="round"/>
-        <path d="m434 159-34 18m42-13-34 18m42-13-34 18" stroke="#FFDFD2" strokeWidth="2" strokeLinecap="round"/>
-      </g>
-      <g className="ts-assembly-piece ts-assembly-ink" transform="translate(-5 4)">
-        <polygon points="232,142 184,167 184,197 232,172" fill="#16223C"/>
-        <polygon points="232,192 184,217 184,247 232,222" fill="#16223C"/>
-        <polygon points="184,217 88,167 88,197 184,247" fill="#1E2A49"/>
-        <polygon points="184,117 232,142 184,167 232,192 184,217 88,167" fill="#26345A" stroke="#FFFFFF" strokeOpacity=".24" strokeWidth="1" strokeLinejoin="round"/>
-        <path d="m162 202 22 12 22-12" stroke="#A9BADB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-      </g>
-      <g className="ts-assembly-piece ts-assembly-front" transform="translate(4 6)">
-        <polygon points="328,192 280,217 280,247 328,222" fill="#1B38C7"/>
-        <polygon points="328,242 280,267 280,297 328,272" fill="#1B38C7"/>
-        <polygon points="280,267 184,217 184,247 280,297" fill="#2446DB"/>
-        <polygon points="280,167 328,192 280,217 328,242 280,267 184,217" fill="#3156F4" stroke="#FFFFFF" strokeOpacity=".24" strokeWidth="1" strokeLinejoin="round"/>
-      </g>
-      <g className="ts-assembly-signal"><circle cx="495" cy="280" r="4" fill="#ED7559"/><path d="M480 280h-34" stroke="#D8DDE8" strokeWidth="1"/></g>
+    <svg className="ts-assembly ts-joined-assembly" viewBox="0 0 560 350" fill="none" focusable="false">
+      <defs><filter id="ts-joined-shadow" x="-30%" y="-40%" width="160%" height="190%"><feGaussianBlur stdDeviation="9"/></filter></defs>
+      <path d="m80 201 200-108 200 108-200 108Z" fill="#152444" opacity=".14" filter="url(#ts-joined-shadow)"/>
+      <path d="m52 204 228 124 228-124M52 204l17-9m422 0 17 9" stroke="#D9DDE7"/>
+      {ASSEMBLY_TILES.map(tile => <g className={`ts-joined-tile ts-joined-${tile.name}`} key={tile.name}>
+        {tile.edges.map(([first,last],index) => <polygon key={index} points={[tilePoint(first),tilePoint(last),tilePoint(last,27),tilePoint(first,27)].join(" ")} fill={tile.side}/>)}
+        <polygon points={tile.points.map(point => tilePoint(point)).join(" ")} fill={tile.top} stroke="#F7F7F2" strokeWidth="1.15" strokeOpacity=".7" strokeLinejoin="round"/>
+      </g>)}
+      <path d="m250 97 20-11 20 11-20 11Z" stroke="#B7C5FF" strokeWidth="1.8"/>
+      <path d="m413 167 24 13m-30-6 24 13m-30-6 24 13" stroke="#FFE0D4" strokeWidth="1.8" strokeLinecap="round"/>
+      <path d="m133 205 22 12 22-12" stroke="#A6B8DB" strokeWidth="1.8" strokeLinejoin="round"/>
+      <circle className="ts-fit-signal" cx="492" cy="291" r="4" fill="#3658F5"/>
+      <path d="M459 291h21" stroke="#D8DDE8"/>
     </svg>
-    <span className="ts-assembly-footnote"><i/> BUILT TOGETHER. BUILT FOR WHAT’S NEXT.</span>
+    <span className="ts-assembly-footnote"><i/> DIFFERENT STRENGTHS. A PERFECT FIT.</span>
   </div>;
 }
 
@@ -88,19 +69,20 @@ export function TeamStudio({ data, save, refresh, onSignOut }: Props) {
   const team = useMemo(() => summarizePlannedTeam(plan, data.resources, data.capabilities), [plan, data.resources, data.capabilities]);
   const activeRole = plan.roles.find(role => role.id === focused) ?? plan.roles[0];
   const client = data.clients.find(item => item.id === draft.clientId);
-  const activePlans = useMemo(() => data.missions.filter(item => item.active && item.engagement), [data.missions]);
-  const clients = data.clients.filter(item => item.active || item.id === draft.clientId);
+  const activePlans = useMemo(() => data.missions.filter(item => item.active && item.engagement && !item.engagement.pipeline), [data.missions]);
+  const clients = data.clients.filter(item => item.active || item.id === draft.clientId).sort(byName);
   const allNamed = useMemo(() => new Set(activePlans.flatMap(item => item.engagement!.roles.flatMap(role => role.selectedResourceIds ?? []))).size, [activePlans]);
   const portfolioSeats = useMemo(() => activePlans.reduce((sum, item) => sum + item.engagement!.roles.reduce((open, role) => open + Math.max(0, role.headcount - (role.selectedResourceIds?.length ?? 0)), 0), 0), [activePlans]);
   const duration = engagementDuration(plan.start, plan.end);
   const matches = useMemo(() => activeRole ? findRoleMatches(activeRole, data.resources, data.capabilities) : [], [activeRole, data.resources, data.capabilities]);
-  const candidatePeople = data.resources.filter(person => person.active && (!matchOnly || matches.some(match => match.resource.id === person.id)) && `${person.name} ${person.home} ${person.profile?.roles.join(" ")} ${person.profile?.skills.join(" ")}`.toLowerCase().includes(peopleSearch.toLowerCase())).sort((a, b) => Number(matches.some(match => match.resource.id === b.id)) - Number(matches.some(match => match.resource.id === a.id)) || a.name.localeCompare(b.name));
+  const candidatePeople = data.resources.filter(person => person.active && (!matchOnly || matches.some(match => match.resource.id === person.id)) && `${person.name} ${person.home} ${person.profile?.roles.join(" ")} ${person.profile?.skills.join(" ")}`.toLowerCase().includes(peopleSearch.toLowerCase())).sort(byName);
 
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
     const query = new URLSearchParams(window.location.search), id = query.get("engagement");
     const existing = data.missions.find(item => item.id === id);
+    if (existing?.engagement?.pipeline) { window.location.replace(`/pipeline?opportunity=${encodeURIComponent(existing.id)}`); return; }
     if (existing) {
       setRecord(existing); setDraft({ name: existing.name, clientId: existing.clientId, plan: existing.engagement ? { ...existing.engagement, source: existing.engagement.source ?? "sow" } : blank().plan });
       setScreen(existing.engagement ? "board" : "brief"); setFocused(existing.engagement?.roles[0]?.id ?? "");
@@ -201,16 +183,16 @@ export function TeamStudio({ data, save, refresh, onSignOut }: Props) {
       else setError("Latest workspace loaded. Your draft is unchanged; you can retry saving.");
     } catch (cause) { setError(cleanError(cause)); } finally { setBusy(false); }
   }
-  const visiblePlans = data.missions.filter(item => item.active && (!clientFilter || item.clientId === clientFilter) && `${item.name} ${data.clients.find(c => c.id === item.clientId)?.name}`.toLowerCase().includes(search.toLowerCase()));
+  const visiblePlans = data.missions.filter(item => item.active && !item.engagement?.pipeline && (!clientFilter || item.clientId === clientFilter) && `${item.name} ${data.clients.find(c => c.id === item.clientId)?.name}`.toLowerCase().includes(search.toLowerCase())).sort(byName);
 
   return <div className="ts-app">
-    <header className="ts-nav"><a className="ts-brand" href="/studio" onClick={event => { event.preventDefault(); leave(); }} aria-label="BOOKENDS Team Studio"><span>[<i>:</i>]</span>BOOKENDS<span className="ts-brand-divider"/> <small>TEAM STUDIO</small></a><nav><a href="/admin" target="_blank" rel="noreferrer"><Settings2 size={16}/> Workspace setup</a>{onSignOut && <button aria-label="Lock workspace" onClick={() => { if (!dirty || window.confirm("Lock the workspace and discard this unsaved plan?")) { setDirty(false); onSignOut(); } }}><LogOut size={17}/></button>}</nav></header>
+    <header className="ts-nav"><a className="ts-brand" href="/studio" onClick={event => { event.preventDefault(); leave(); }} aria-label="BOOKENDS Team Studio"><span>[<i>:</i>]</span>BOOKENDS<span className="ts-brand-divider"/> <small>TEAM STUDIO</small></a><nav><a href="/pipeline" onClick={event => { if (dirty && !window.confirm("Leave this unsaved team plan?")) event.preventDefault(); }}><Layers3 size={16}/> What if</a><a href="/admin" target="_blank" rel="noreferrer" aria-label="Workspace setup"><Settings2 size={16}/><span className="ts-setup-link-label">Workspace setup</span></a>{onSignOut && <button aria-label="Lock workspace" onClick={() => { if (!dirty || window.confirm("Lock the workspace and discard this unsaved plan?")) { setDirty(false); onSignOut(); } }}><LogOut size={17}/></button>}</nav></header>
     {screen !== "lobby" && <div className="ts-breadcrumb"><button onClick={leave}><ArrowLeft size={15}/> All engagements</button><span>/</span><span>{screen === "intake" ? "SOW intake" : draft.name || "New engagement"}</span><span className="ts-draft-marker">{dirty ? "Unsaved draft" : record ? "Saved team plan" : "New team plan"}</span></div>}
     {error && <div className="ts-error" role="alert" ref={errorRef} tabIndex={-1}><CircleHelp size={20}/><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError("")}><X size={16}/></button></div>}
     {screen === "lobby" ? <>
       <section className="ts-hero"><div><p className="ts-eyebrow"><span/> THE NEXT CHAPTER STARTS WITH YOUR PEOPLE</p><h1 ref={heading} tabIndex={-1}>Good work.<br/><em>Great chemistry.</em></h1><p className="ts-hero-copy">Turn a client’s ambition into a team that can make it happen. Pick your people. Shape the work. See the whole picture.</p><div className="ts-live-stats"><span><b>{activePlans.length.toString().padStart(2, "0")}</b> engagement plans</span><span><b>{allNamed.toString().padStart(2, "0")}</b> people selected</span><span><b>{portfolioSeats.toString().padStart(2, "0")}</b> open positions</span></div></div><TeamAssemblyArt /></section>
       <section className="ts-entry-grid" aria-label="Start an engagement"><button className="ts-entry ts-entry-direct" onClick={() => openNew("direct")}><span className="ts-entry-icon"><UsersRound size={27}/></span><span><small>YOU KNOW THE TEAM</small><strong>Build it myself</strong><p>Client, timeframe, roles, people. Straight to the board.</p></span><ArrowRight className="ts-entry-arrow" size={27}/></button><button className="ts-entry ts-entry-sow" onClick={() => openNew("sow")}><span className="ts-entry-icon"><Sparkles size={27}/></span><span><small>LET THE BRIEF DO THE WORK</small><strong>Start from an SOW</strong><p>Bring a document. Get a draft you can make your own.</p></span><ArrowRight className="ts-entry-arrow" size={27}/></button></section>
-      <section className="ts-portfolio"><div className="ts-section-heading"><div><p className="ts-eyebrow">YOUR WORK, COMING TOGETHER</p><h2>On the board <span>{data.missions.filter(item => item.active).length}</span></h2></div><div className="ts-filters"><label className="ts-search"><Search size={16}/><input aria-label="Find an engagement" placeholder="Find an engagement" value={search} onChange={event => setSearch(event.target.value)}/></label><select aria-label="Filter by client" value={clientFilter} onChange={event => setClientFilter(event.target.value)}><option value="">All clients</option>{clients.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div></div>
+      <section className="ts-portfolio"><div className="ts-section-heading"><div><p className="ts-eyebrow">YOUR WORK, COMING TOGETHER</p><h2>On the board <span>{data.missions.filter(item => item.active && !item.engagement?.pipeline).length}</span></h2></div><div className="ts-filters"><label className="ts-search"><Search size={16}/><input aria-label="Find an engagement" placeholder="Find an engagement" value={search} onChange={event => setSearch(event.target.value)}/></label><select aria-label="Filter by client" value={clientFilter} onChange={event => setClientFilter(event.target.value)}><option value="">All clients</option>{clients.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div></div>
       {visiblePlans.length ? <div className="ts-portfolio-grid">{visiblePlans.map((item, index) => { const itemPlan = item.engagement, summary = itemPlan && summarizePlannedTeam(itemPlan, data.resources); return <button key={item.id} className={`ts-plan-card ts-color-${index % 4}`} onClick={() => openPlan(item)}><div className="ts-plan-top"><span>{data.clients.find(c => c.id === item.clientId)?.name}</span><span>{itemPlan?.source === "direct" ? "Direct plan" : itemPlan?.status === "signed" ? "Signed SOW" : "Draft"}</span></div><h3>{item.name}</h3><p>{itemPlan ? `${dateLabel(itemPlan.start, true)} — ${dateLabel(itemPlan.end, true)}` : "Add the timeframe and team"}</p><div className="ts-plan-seats">{Array.from({ length: Math.min(summary?.totalSeats ?? 4, 12) }, (_, i) => <span key={i} className={i < (summary?.namedSeats ?? 0) ? "filled" : ""}>{i < (summary?.namedSeats ?? 0) ? <Check size={14}/> : <Plus size={13}/>}</span>)}{(summary?.totalSeats ?? 0) > 12 && <small>+{summary!.totalSeats - 12}</small>}</div><div className="ts-plan-bottom"><span><b>{summary?.namedSeats ?? 0}</b> selected <i>·</i> <b>{summary?.openSeats ?? 0}</b> open</span><ArrowRight size={20}/></div></button>; })}</div> : <div className="ts-empty-board"><span className="ts-empty-symbol">[ + ]</span><h3>{search || clientFilter ? "No plans in this view." : "Your next great team belongs here."}</h3><p>{search || clientFilter ? "Try a different client or search." : "Start with the people you already know, or let an SOW give you a head start."}</p>{!search && !clientFilter && <button className="ts-text-button" onClick={() => openNew("direct")}>Build your first team <ArrowRight size={16}/></button>}</div>}</section>
       <footer className="ts-footer"><span>EVERY ENDING. A NEW BEGINNING.</span><a href="/admin?section=resources" target="_blank" rel="noreferrer">Add people & skills <ArrowRight size={14}/></a></footer>
     </> : screen === "intake" ? <SowIntakePanel onSessionExpired={() => { void refresh().catch(() => {}); }} onDraft={receiveSow} onCancel={() => { setScreen("brief"); }}/>

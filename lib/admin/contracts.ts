@@ -1,5 +1,6 @@
 import type { JourneyKind, JourneyRole, JourneyTemplate, PermissionScope, RequirementTemplate } from "../journeys/types";
 import type { EngagementPlan, ResourceProfile } from "./engagement";
+import type { ForecastWorkspace } from "../forecast/types";
 
 export type AdminClient = { id: string; name: string; code: string; contactName: string; contactEmail: string; notes: string; active: boolean; revision: number };
 export type AdminHome = { id: string; code: string; name: string; description: string; active: boolean; revision: number };
@@ -21,6 +22,7 @@ export type AdminBootstrap = {
   templates: AdminPlaybook[];
   asOf: string;
   hasMore?: boolean;
+  forecast?: ForecastWorkspace;
 };
 type EditIdentity = { id?: string; expectedRevision?: number };
 type Toggle = { id: string; expectedRevision: number; active: boolean };

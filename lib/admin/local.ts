@@ -6,13 +6,15 @@ import type { AdminBootstrap, AdminCommand, AdminGrant, AdminMember, AdminPlaybo
 import { adminRequestSchema } from "./validation";
 import { capabilityAliasesAfterRename, capabilityNameKey, capabilitySchema, engagementPlanSchema, profileSchema } from "./engagement";
 import { plannedTeamReferenceIssues } from "../studio/team";
+import { forecastReferenceIssues, forecastWorkspaceSchema, saveForecastCommandSchema } from "../forecast/validation";
+import type { ForecastWorkspace } from "../forecast/types";
 
 /** Browser-local configuration only. These records never establish an authenticated identity or permission. */
 export type LocalAdminStore = { version: 1; revision: number; clientSeedVersion?: 1; data: AdminBootstrap };
 export type LocalAdminCommand = AdminCommand | {
   type: "create_local_member"; name: string; role: JourneyRole; resourceId: string | null;
   homeScope: string | null; grants: AdminGrant[];
-};
+} | { type: "save_forecast"; expectedRevision: number; forecast: ForecastWorkspace };
 export const LOCAL_ADMIN_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
 export const LOCAL_ADMIN_OWNER_ID = "00000000-0000-4000-8000-000000000002";
 export const MAX_LOCAL_ADMIN_BYTES = 4 * 1024 * 1024;
@@ -57,7 +59,7 @@ const storeSchema = z.object({
     missions: z.array(z.object({ ...recordFields, name: text(160), clientId: id, engagement: engagementPlanSchema.optional() }).strict()).max(MAX_RECORDS),
     capabilities: z.array(capabilitySchema).max(MAX_RECORDS).default([]),
     members: z.array(z.object({ ...recordFields, ...memberFields }).strict()).min(1).max(MAX_RECORDS),
-    templates: z.array(templateSchema).min(4).max(200), asOf: z.iso.datetime(), hasMore: z.literal(false).optional(),
+    templates: z.array(templateSchema).min(4).max(200), asOf: z.iso.datetime(), hasMore: z.literal(false).optional(), forecast: forecastWorkspaceSchema.optional(),
   }).strict(),
 }).strict();
 
@@ -104,6 +106,7 @@ function jsonValue(input: unknown): unknown {
   return parsed;
 }
 function validateLinks(data: AdminBootstrap) {
+  if (data.forecast) { const issue = forecastReferenceIssues(data.forecast, data)[0]; ensure(!issue, "invalid_reference", issue ?? "Review forecast references."); }
   for (const [label, records] of Object.entries({ clients: data.clients, HOMEs: data.homes, people: data.resources, missions: data.missions, capabilities: data.capabilities ?? [], members: data.members, playbooks: data.templates })) unique(records.map(record => record.id), `${label} IDs`);
   unique((data.capabilities ?? []).flatMap(capability => [capability.name, ...(capability.aliases ?? [])].map(name => `${capability.kind}:${capabilityNameKey(name)}`)), "Role and skill names, including former names");
   unique(data.clients.map(client => client.code), "Client codes"); unique(data.homes.map(home => home.code), "HOME codes");
@@ -193,6 +196,7 @@ export function parseLocalAdminCommand(raw: unknown): LocalAdminCommand {
   const type = raw && typeof raw === "object" && "type" in raw ? raw.type : undefined;
   if (type === "create_local_member") return localMemberCommand.parse(raw);
   if (type === "save_resource") return localResourceCommand.parse(raw);
+  if (type === "save_forecast") return saveForecastCommandSchema.parse(raw);
   return adminRequestSchema.parse({ idempotencyKey: LOCAL_ADMIN_OWNER_ID, command: raw }).command;
 }
 
@@ -202,6 +206,16 @@ export function applyLocalAdminCommand(input: LocalAdminStore, raw: LocalAdminCo
   const command = parseLocalAdminCommand(raw);
   const now = new Date().toISOString();
   switch (command.type) {
+    case "save_forecast": {
+      ensure((data.forecast?.revision ?? 0) === command.expectedRevision && command.forecast.revision === command.expectedRevision, "conflict", "This forecast changed. Reload before saving your scenario.");
+      for (const commitment of command.forecast.commitments) {
+        const prior = data.forecast?.commitments.find(row => row.id === commitment.id);
+        if (!commitment.missionId || (prior && JSON.stringify(prior) === JSON.stringify(commitment))) continue;
+        const mission = data.missions.find(row => row.id === commitment.missionId), plan = mission?.engagement;
+        ensure(mission?.active && plan && !plan.pipeline && (plan.status === "signed" || (plan.source === "direct" && plan.status === "draft")), "invalid_reference", "Link a confirmed commitment to signed work or an active direct team plan. Keep potential SOWs in scenarios.");
+      }
+      data.forecast = { ...command.forecast, revision: command.expectedRevision + 1 }; break;
+    }
     case "set_organization":
       ensure(data.organization.revision === command.expectedRevision, "conflict", "The workspace name changed. Reload before saving.");
       data.organization = { ...data.organization, name: command.name, revision: data.organization.revision + 1 }; break;

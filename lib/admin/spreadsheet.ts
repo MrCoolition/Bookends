@@ -13,12 +13,12 @@ export const SPREADSHEET_HEADERS = {
   Clients: ["Client code", "Client name", "Contact name", "Contact email", "Notes", "Record ID", "Revision", "Active"],
   People: ["Person name", "HOME code", "Owner name", "Delivery roles", "Skills", "Designation", "Record ID", "Revision", "Active"],
   Missions: ["Mission name", "Client code", "Record ID", "Revision", "Active"],
-  Engagements: ["Engagement name", "Client code", "SOW reference", "Status", "Signed on", "Start date", "End date", "Outcomes", "Source", "Record ID", "Revision", "Active"],
+  Engagements: ["Engagement name", "Client code", "SOW reference", "Status", "Signed on", "Start date", "End date", "Outcomes", "Source", "Record ID", "Revision", "Active", "Pipeline stage", "Confidence %", "Expected close"],
   "Engagement roles": ["Engagement name", "Client code", "Role name", "Headcount", "Allocation %", "Skills", "Responsibilities", "Start date", "End date", "Role ID", "Engagement ID", "Revision", "Selected people IDs"],
   Roles: ["Name", "Description", "Record ID", "Revision", "Active"],
   Skills: ["Name", "Description", "Record ID", "Revision", "Active"],
 } as const;
-export const SPREADSHEET_REFERENCE_SHEETS = ["Workspace", "Members", "Playbooks", "Requirements", "SOW notes", "Team selections"] as const;
+export const SPREADSHEET_REFERENCE_SHEETS = ["Workspace", "Members", "Playbooks", "Requirements", "SOW notes", "Team selections", "Forecast", "Capacity", "Commitments", "Scenarios"] as const;
 export type SpreadsheetSheetName = keyof typeof SPREADSHEET_HEADERS;
 export type SpreadsheetCell = string | number | boolean | null | { formula: string } | { unsupported: string };
 export type SpreadsheetIssue = { sheet: string; row: number; field: string; message: string };
@@ -311,6 +311,19 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
         const source = read("Source", current?.source ?? "").toLocaleLowerCase("en-US");
         if (source && source !== "direct" && source !== "sow") { rowIssue(row, "Source", "Choose direct or sow, or leave blank for the original SOW interpretation."); continue; }
         if (source === "direct" || source === "sow") engagement.source = source; else delete engagement.source;
+        if (row.columns.has("Pipeline stage")) {
+          const stage = value("Pipeline stage").toLocaleLowerCase("en-US");
+          if (!stage) {
+            if (value("Confidence %") || value("Expected close")) { rowIssue(row, "Pipeline stage", "Choose a pipeline stage with confidence, or clear all three pipeline fields for an ordinary engagement."); continue; }
+            delete engagement.pipeline;
+          } else {
+            if (!["exploring", "qualified", "proposal", "negotiation", "lost"].includes(stage)) { rowIssue(row, "Pipeline stage", "Choose exploring, qualified, proposal, negotiation, or lost."); continue; }
+            const confidence = read("Confidence %", current?.pipeline ? String(current.pipeline.confidence) : "").replace(/%$/, "");
+            if (!confidence || !Number.isFinite(Number(confidence)) || Number(confidence) < 0 || Number(confidence) > 100) { rowIssue(row, "Confidence %", "Enter confidence from 0 to 100 for this potential SOW."); continue; }
+            engagement.pipeline = { stage: stage as NonNullable<EngagementPlan["pipeline"]>["stage"], confidence: Number(confidence), expectedClose: read("Expected close", current?.pipeline?.expectedClose ?? "") || null };
+          }
+        }
+
         merge<AdminMission>(row, found.existing, { ...fields, engagement }, data.missions, missions, missionKey, `${missionName} · ${clientCode}`);
         const saved = missions.get(missionKey)?.[0]; if (saved) { engagementRows.set(saved.id, row); touchedEngagements.add(saved.id); }
       } else merge<AdminMission>(row, found.existing, fields, data.missions, missions, missionKey, `${missionName} · ${clientCode}`);
@@ -324,7 +337,7 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
       const role = issue.path[0] === "roles" && typeof issue.path[1] === "number" ? mission.engagement!.roles[issue.path[1]] : undefined;
       const row = role ? roleRows.get(key(mission.id, role.name.toLocaleLowerCase())) ?? engagementRows.get(mission.id) : engagementRows.get(mission.id);
       const fieldKey = String(issue.path[role ? 2 : 0] ?? "Row");
-      const field = ({ sowReference: "SOW reference", status: "Status", signedOn: "Signed on", start: "Start date", end: "End date", outcomes: "Outcomes", roles: "Engagement roles", name: "Role name", headcount: "Headcount", allocationPercent: "Allocation %", skills: "Skills", responsibilities: "Responsibilities", selectedResourceIds: "Selected people IDs", source: "Source" } as Record<string, string>)[fieldKey] ?? "Row";
+      const field = ({ sowReference: "SOW reference", status: "Status", signedOn: "Signed on", start: "Start date", end: "End date", outcomes: "Outcomes", roles: "Engagement roles", name: "Role name", headcount: "Headcount", allocationPercent: "Allocation %", skills: "Skills", responsibilities: "Responsibilities", selectedResourceIds: "Selected people IDs", source: "Source", pipeline: "Pipeline stage, confidence and expected close" } as Record<string, string>)[fieldKey] ?? "Row";
       errors.push({ sheet: row?.sheet ?? "Engagement roles", row: row?.row ?? 0, field, message: issue.message });
     }
   }
@@ -338,7 +351,7 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
   return { draft, counts, sheets, errors, changes };
 }
 
-function describeEngagement(plan: EngagementPlan) { return `${plan.source === "direct" ? "Direct team plan" : "SOW plan"} · ${plan.status} · ${plan.sowReference || "No SOW reference"} · ${plan.start} to ${plan.end}${plan.signedOn ? ` · signed ${plan.signedOn}` : ""}${plan.outcomes ? ` · ${plan.outcomes}` : ""}`; }
+function describeEngagement(plan: EngagementPlan) { return `${plan.pipeline ? `Potential: ${plan.pipeline.stage} · ${plan.pipeline.confidence}% confidence${plan.pipeline.expectedClose ? ` · close ${plan.pipeline.expectedClose}` : ""} · ` : ""}${plan.source === "direct" ? "Direct team plan" : "SOW plan"} · ${plan.status} · ${plan.sowReference || "No SOW reference"} · ${plan.start} to ${plan.end}${plan.signedOn ? ` · signed ${plan.signedOn}` : ""}${plan.outcomes ? ` · ${plan.outcomes}` : ""}`; }
 function describeProfile(profile?: ResourceProfile) { return `${profile?.affiliation === "impower" ? "Impower" : profile?.affiliation === "contractor" ? "Contractor" : "Not designated"} · ${formatNamedList(profile?.roles ?? []) || "No delivery roles"} · ${formatNamedList(profile?.skills ?? []) || "No skills"}`; }
 
 export function planSpreadsheetImport(input: LocalAdminStore, raw: SpreadsheetWorkbook): SpreadsheetImportPlan {
@@ -445,8 +458,8 @@ export async function readSpreadsheetFile(file: File): Promise<SpreadsheetWorkbo
           result.errors!.push({ sheet: sheet.name, row: rowNumber, field: columnName(column - 1), message: rowNumber > MAX_ROWS ? "Move data into rows 5–1004; later data cannot be imported." : "Move data into a supported template column; this column is outside the import area." }); return;
         }
         let value: SpreadsheetCell;
-        if (cell.value instanceof Date && Number.isFinite(cell.value.getTime()) && ["Start date", "End date", "Signed on"].some(header => String(sheet.getCell(4, column).value).trim().toLowerCase() === header.toLowerCase())) value = cell.value.toISOString().slice(0, 10);
-        else if (typeof cell.value === "number" && String(sheet.getCell(4, column).value).trim().toLowerCase() === "allocation %" && (cell.numFmt ?? "").replace(/"[^"]*"|\\./g, "").includes("%")) value = cell.value * 100;
+        if (cell.value instanceof Date && Number.isFinite(cell.value.getTime()) && ["Start date", "End date", "Signed on", "Expected close"].some(header => String(sheet.getCell(4, column).value).trim().toLowerCase() === header.toLowerCase())) value = cell.value.toISOString().slice(0, 10);
+        else if (typeof cell.value === "number" && ["allocation %", "confidence %"].includes(String(sheet.getCell(4, column).value).trim().toLowerCase()) && (cell.numFmt ?? "").replace(/"[^"]*"|\\./g, "").includes("%")) value = cell.value * 100;
         else if (typeof cell.value === "string" || typeof cell.value === "number" || typeof cell.value === "boolean") value = cell.value;
         else if (typeof cell.value === "object" && ("formula" in cell.value || "sharedFormula" in cell.value)) value = { formula: String(cell.formula || "formula") };
         else if (typeof cell.value === "object" && "hyperlink" in cell.value && typeof cell.value.text === "string") value = cell.value.text;

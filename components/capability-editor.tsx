@@ -5,6 +5,7 @@ import { ArrowRight, BriefcaseBusiness, Check, ChevronDown, Plus, Search, Wrench
 import type { AdminBootstrap, AdminCapability } from "@/lib/admin/contracts";
 import { parseNamedList, formatNamedList } from "@/lib/admin/named-list";
 import type { LocalAdminCommand } from "@/lib/admin/local";
+import { byName, compareNames } from "@/lib/alphabetical";
 
 type CapabilityKind = "role" | "skill";
 const nameKey = (value: string) => value.trim().toLocaleLowerCase("en-US");
@@ -41,7 +42,7 @@ export function CapabilityMultiSelect({ kind, entries, value, onChange }: { kind
   const limit = kind === "role" ? 30 : 100;
   const query = search.trim();
   const sameKind = entries.filter(entry => entry.kind === kind);
-  const options = sameKind.filter(entry => entry.active);
+  const options = sameKind.filter(entry => entry.active).sort(byName);
   const exactEntry = sameKind.find(entry => entry.active && represents(entry, query)) || sameKind.find(entry => represents(entry, query));
   const otherKindEntry = (name: string) => {
     const currentKind = sameKind.find(entry => entry.active && represents(entry, name)) || sameKind.find(entry => represents(entry, name));
@@ -63,9 +64,10 @@ export function CapabilityMultiSelect({ kind, entries, value, onChange }: { kind
     else if (value.length < limit) { onChange([...value, entry.name]); setNotice(`${entry.name} added.`); }
   };
   const misplaced = value.filter(item => otherKindEntry(item));
+  const selectedValues = value.map((item, index) => ({ item, index })).sort((a, b) => compareNames(a.item, b.item) || a.index - b.index);
   return <section className={`capability-multiselect capability-${kind}`} aria-labelledby={`${id}-heading`}>
     <header><span className="capability-field-icon"><Icon size={19}/></span><div><h4 id={`${id}-heading`}>{kind === "role" ? "Delivery roles" : "Skills"}</h4><p>{kind === "role" ? "The roles this person can fill. Choose more than one." : "Their tools and expertise. Choose as many as they bring."}</p></div><span className="capability-selection-count">{value.length} selected</span></header>
-    {!!value.length && <ul className="capability-selected" aria-label={`Selected ${plural}`}>{value.map((item, index) => <li key={`${item}-${index}`}><Icon size={13}/><span>{item}</span><button type="button" aria-label={`Remove ${item} from ${plural}`} onClick={() => { onChange(value.filter((_, itemIndex) => itemIndex !== index)); setNotice(`${item} removed.`); }}><X size={14}/></button></li>)}</ul>}
+    {!!value.length && <ul className="capability-selected" aria-label={`Selected ${plural}`}>{selectedValues.map(({ item, index }) => <li key={`${item}-${index}`}><Icon size={13}/><span>{item}</span><button type="button" aria-label={`Remove ${item} from ${plural}`} onClick={() => { onChange(value.filter((_, itemIndex) => itemIndex !== index)); setNotice(`${item} removed.`); }}><X size={14}/></button></li>)}</ul>}
     {misplaced.length > 0 && <p className="capability-input-hint capability-input-warning">{misplaced.join(", ")} {misplaced.length === 1 ? "is a" : "are"} configured {kind === "role" ? "skill" : "role"}{misplaced.length === 1 ? "" : "s"}. Remove {misplaced.length === 1 ? "it" : "them"} here and choose {misplaced.length === 1 ? "it" : "them"} under {kind === "role" ? "Skills" : "Delivery roles"}.</p>}
     <label className="capability-search" htmlFor={`${id}-search`}><Search size={16}/><input id={`${id}-search`} aria-label={`Search or add ${plural}`} aria-describedby={`${id}-hint`} value={search} onChange={event => { setSearch(event.target.value); setNotice(""); }} onKeyDown={event => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); add(); } }} maxLength={kind === "role" ? 160 : 100} autoComplete="off" placeholder={`Search or add ${kind === "role" ? "a role" : "a skill"}…`}/></label>
     <div className="capability-options" aria-label={`Available ${plural}`}>{matching.map(entry => <button type="button" key={entry.id} aria-pressed={selected(entry)} disabled={!selected(entry) && value.length >= limit} title={entry.description || entry.name} onClick={() => toggle(entry)}>{selected(entry) ? <Check size={13}/> : <Plus size={13}/>}<span>{entry.name}</span></button>)}</div>
@@ -80,7 +82,7 @@ export function CatalogChoices({ kind, entries, value, onChange }: { kind: "role
   const id = useId();
   const parsed = parseNamedList(value);
   const chosen = parsed.values;
-  const options = entries.filter(entry => entry.active && entry.kind === kind);
+  const options = entries.filter(entry => entry.active && entry.kind === kind).sort(byName);
   const matching = options.filter(entry => `${entry.name} ${entry.description}`.toLowerCase().includes(search.toLowerCase()));
   const selected = (entry: AdminCapability) => chosen.some(item => represents(entry, item));
   const Icon = kind === "role" ? BriefcaseBusiness : Wrench;

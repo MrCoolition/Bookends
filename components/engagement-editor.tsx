@@ -1,5 +1,7 @@
 "use client";
 
+import { byName } from "@/lib/alphabetical";
+
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown, Code2, Copy, FileSignature, Layers3, Plus, Search, Sparkles, Trash2, UsersRound } from "lucide-react";
 import type { AdminBootstrap, AdminCapability, AdminMission, AdminResource } from "@/lib/admin/contracts";
@@ -23,7 +25,7 @@ export function EngagementCard({ record, client, onEdit }: { record: AdminMissio
   const plan = record.engagement;
   const summary = plan && summarizeEngagement(plan);
   return <button className={`eng-card ${record.active ? "" : "eng-inactive"}`} onClick={onEdit}>
-    <div className="eng-card-heading"><span>{client}</span><span className={`eng-status status-${plan?.status || "draft"}`}>{!record.active ? "Inactive" : plan?.status === "signed" ? "SOW signed" : plan?.status === "complete" ? "Complete" : "Draft"}</span></div>
+    <div className="eng-card-heading"><span>{client}</span><span className={`eng-status status-${plan?.status || "draft"}`}>{!record.active ? "Inactive" : plan?.pipeline ? `Potential · ${plan.pipeline.confidence}%` : plan?.status === "signed" ? "SOW signed" : plan?.status === "complete" ? "Complete" : "Draft"}</span></div>
     <h3>{record.name}</h3>
     {plan && summary ? <><p className="eng-card-reference"><FileSignature size={14}/>{plan.sowReference || "SOW reference to add"}</p><div className="eng-card-numbers"><div><strong>{summary.totalSeats}</strong><span>role positions</span></div><div><strong>{summary.months}<small> mo</small></strong><span>engagement span</span></div><div><strong>{pretty(summary.peakFte)}</strong><span>FTE at peak</span></div></div><div className="eng-card-roles">{plan.roles.slice(0, 4).map(role => <span key={role.id}><b>{role.headcount}×</b> {role.name}</span>)}{plan.roles.length > 4 && <span>+{plan.roles.length - 4} more</span>}</div><div className="eng-card-period"><CalendarDays size={14}/>{engagementDate(plan.start)} → {engagementDate(plan.end)}</div></> : <div className="eng-card-legacy"><Layers3 size={25}/><p>Add the SOW, dates, and team this engagement needs.</p><span>Your existing mission history stays connected.</span></div>}
     <div className="eng-card-bottom"><span>{plan ? "View team needs & matches" : "Build the engagement plan"}</span><ArrowRight size={17}/></div>
@@ -141,13 +143,13 @@ export function EngagementEditor({ record, data, save, close }: { record?: Admin
     finally { lock.current = false; setBusy(false); }
   }
   return <form ref={form} className="admin-form eng-editor" onSubmit={submit} noValidate>
-    <datalist id={`${id}-role-catalog`}>{(data.capabilities || []).filter(entry => entry.active && entry.kind === "role").map(entry => <option key={entry.id} value={entry.name}/>)}</datalist>
+    <datalist id={`${id}-role-catalog`}>{(data.capabilities || []).filter(entry => entry.active && entry.kind === "role").sort(byName).map(entry => <option key={entry.id} value={entry.name}/>)}</datalist>
     <nav className="eng-steps" aria-label="Engagement setup steps">{(["The engagement", "Build the team", "Review & save"] as const).map((label, index) => <button type="button" key={label} aria-current={step === index + 1 ? "step" : undefined} disabled={busy} onClick={() => index === 0 ? navigate(1) : next(index === 1 ? 2 : 3)}><span aria-hidden="true">{index + 1 < step ? <Check size={13}/> : `0${index + 1}`}</span>{label}</button>)}</nav>
     <div className="eng-stage-heading"><p className="admin-eyebrow">{step === 1 ? "START WITH WHAT YOU SOLD" : step === 2 ? "GREAT WORK IS A TEAM SPORT" : "THE WHOLE ENGAGEMENT, IN VIEW"}</p><h3 ref={heading} tabIndex={-1}>{step === 1 ? "A big idea. A clear brief." : step === 2 ? "Who will make it happen?" : name || "Your delivery team."}</h3><p>{step === 1 ? "Set the SOW and its delivery window. Then shape the team it needs." : step === 2 ? "Plan positions by role, skills, and a share of each person’s capacity." : `${clientName} · Review the demand, timing, and possible teammate matches.`}</p></div>
     {error && <p ref={errorRef} tabIndex={-1} className="admin-error" role="alert">{error}</p>}
     {step === 1 && <>
       <label>Engagement name<input required value={name} onChange={event => setName(event.target.value)} maxLength={160} placeholder="e.g. Customer platform build"/></label>
-      <label>Client<select required value={clientId} onChange={event => setClientId(event.target.value)}><option value="">Choose a client</option>{data.clients.filter(client => client.active || client.id === clientId).map(client => <option value={client.id} key={client.id}>{client.name}{client.active ? "" : " (inactive)"}</option>)}</select>{!data.clients.length && <small>Add a client in the Clients section first.</small>}</label>
+      <label>Client<select required value={clientId} onChange={event => setClientId(event.target.value)}><option value="">Choose a client</option>{data.clients.filter(client => client.active || client.id === clientId).sort(byName).map(client => <option value={client.id} key={client.id}>{client.name}{client.active ? "" : " (inactive)"}</option>)}</select>{!data.clients.length && <small>Add a client in the Clients section first.</small>}</label>
       <label>Outcomes & scope<textarea value={outcomes} onChange={event => setOutcomes(event.target.value)} maxLength={4000} rows={3} placeholder="What are we delivering, and what does success look like?"/></label>
       <div className="eng-field-heading"><FileSignature size={18}/><h4>The statement of work</h4></div>
       <div className="admin-form-columns"><label>SOW reference<input value={reference} onChange={event => setReference(event.target.value)} maxLength={160} placeholder="e.g. ACME-2027-001"/></label><label>SOW status<select value={status} onChange={event => setStatus(event.target.value as EngagementPlan["status"])}><option value="draft">Draft / not yet signed</option><option value="signed">Signed</option><option value="complete">Complete</option></select></label></div>
