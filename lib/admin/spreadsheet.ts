@@ -2,7 +2,7 @@ import { z } from "zod";
 import { adminRequestSchema } from "./validation";
 import { LOCAL_ADMIN_OWNER_ID, parseLocalAdminCommand, parseLocalAdminStore, type LocalAdminStore } from "./local";
 import type { AdminCapability, AdminClient, AdminHome, AdminMission, AdminResource } from "./contracts";
-import { capabilityNameKey, engagementPlanSchema, type EngagementPlan, type EngagementRole } from "./engagement";
+import { capabilityNameKey, engagementPlanSchema, type EngagementPlan, type EngagementRole, type ResourceProfile } from "./engagement";
 import { formatNamedList, parseNamedList } from "./named-list";
 
 export const MAX_SPREADSHEET_BYTES = 5 * 1024 * 1024;
@@ -11,7 +11,7 @@ const MAX_ROWS = 1004, MAX_COLUMNS = 64, MAX_RECORDS = 1000;
 export const SPREADSHEET_HEADERS = {
   HOMEs: ["HOME code", "HOME name", "Description"],
   Clients: ["Client code", "Client name", "Contact name", "Contact email", "Notes"],
-  People: ["Person name", "HOME code", "Owner name", "Delivery roles", "Skills"],
+  People: ["Person name", "HOME code", "Owner name", "Delivery roles", "Skills", "Designation"],
   Missions: ["Mission name", "Client code"],
   Engagements: ["Engagement name", "Client code", "SOW reference", "Status", "Signed on", "Start date", "End date", "Outcomes"],
   "Engagement roles": ["Engagement name", "Client code", "Role name", "Headcount", "Allocation %", "Skills", "Responsibilities", "Start date", "End date"],
@@ -167,8 +167,8 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
     if (existing) {
       if (!changed(existing, values as Partial<T>)) { changes.push({ sheet: row.sheet, row: row.row, action: "skip", label }); return; }
       const fieldLabels: Record<string, string> = { name: row.sheet === "HOMEs" ? "HOME name" : row.sheet === "Clients" ? "Client name" : row.sheet === "People" ? "Person name" : row.sheet === "Roles" || row.sheet === "Skills" ? "Name" : "Mission name", code: row.sheet === "HOMEs" ? "HOME code" : "Client code", description: "Description", contactName: "Contact name", contactEmail: "Contact email", notes: "Notes", home: "HOME code", ownerId: "Owner name", clientId: "Client code" };
-      const display = (field: string, value: unknown) => field === "ownerId" ? value ? data.members.find(member => member.id === value)?.name ?? "Unavailable owner" : "No owner" : field === "clientId" ? data.clients.find(client => client.id === value)?.code ?? "Unavailable client" : field === "engagement" && value ? describeEngagement(value as EngagementPlan) : field === "profile" && value ? `${formatNamedList((value as { roles: string[] }).roles) || "No delivery roles"} · ${formatNamedList((value as { skills: string[] }).skills) || "No skills"}` : String(value ?? "");
-      const fields = Object.entries(values).filter(([field, value]) => !equal(existing[field as keyof T], value)).map(([field, value]) => ({ field: field === "engagement" ? "SOW and delivery dates" : field === "profile" ? "Delivery roles and skills" : fieldLabels[field] ?? field, before: display(field, existing[field as keyof T]), after: display(field, value) }));
+      const display = (field: string, value: unknown) => field === "ownerId" ? value ? data.members.find(member => member.id === value)?.name ?? "Unavailable owner" : "No owner" : field === "clientId" ? data.clients.find(client => client.id === value)?.code ?? "Unavailable client" : field === "engagement" && value ? describeEngagement(value as EngagementPlan) : field === "profile" ? describeProfile(value as ResourceProfile | undefined) : String(value ?? "");
+      const fields = Object.entries(values).filter(([field, value]) => !equal(existing[field as keyof T], value)).map(([field, value]) => ({ field: field === "engagement" ? "SOW and delivery dates" : field === "profile" ? "Designation, delivery roles and skills" : fieldLabels[field] ?? field, before: display(field, existing[field as keyof T]), after: display(field, value) }));
       Object.assign(existing, values); existing.revision++;
       changes.push({ sheet: row.sheet, row: row.row, action: "update", label, fields });
     } else {
@@ -217,7 +217,11 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
       const roles = row.columns.has("Delivery roles") ? listCell(row, "Delivery roles", value("Delivery roles")) : current?.roles ?? [];
       const skills = row.columns.has("Skills") ? listCell(row, "Skills", value("Skills")) : current?.skills ?? [];
       if (!roles || !skills) continue;
-      const fields = { name: personName, home, ownerId: owners[0]?.id ?? found.existing?.ownerId ?? "", ...(row.columns.has("Delivery roles") || row.columns.has("Skills") ? { profile: { roles, skills } } : {}) };
+      const designation = row.columns.has("Designation") ? value("Designation").toLocaleLowerCase("en-US") : current?.affiliation ?? "";
+      if (designation && designation !== "impower" && designation !== "contractor") { rowIssue(row, "Designation", "Choose Impower or Contractor, or leave blank for no designation."); continue; }
+      const profile: ResourceProfile = { roles, skills };
+      if (designation === "impower" || designation === "contractor") profile.affiliation = designation;
+      const fields = { name: personName, home, ownerId: owners[0]?.id ?? found.existing?.ownerId ?? "", ...(row.columns.has("Delivery roles") || row.columns.has("Skills") || row.columns.has("Designation") ? { profile } : {}) };
       if (!validate(row, { type: "save_resource", ...fields }, { name: "Person name", home: "HOME code", ownerId: "Owner name", profile: "Delivery roles and skills" })) continue;
       merge<AdminResource>(row, found.existing, fields, data.resources, people, personKey, home ? `${personName} · ${home}` : personName);
     } else if (name === "Engagement roles") {
@@ -279,6 +283,7 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
 }
 
 function describeEngagement(plan: EngagementPlan) { return `${plan.status} · ${plan.sowReference || "No SOW reference"} · ${plan.start} to ${plan.end}${plan.signedOn ? ` · signed ${plan.signedOn}` : ""}${plan.outcomes ? ` · ${plan.outcomes}` : ""}`; }
+function describeProfile(profile?: ResourceProfile) { return `${profile?.affiliation === "impower" ? "Impower" : profile?.affiliation === "contractor" ? "Contractor" : "Not designated"} · ${formatNamedList(profile?.roles ?? []) || "No delivery roles"} · ${formatNamedList(profile?.skills ?? []) || "No skills"}`; }
 
 export function planSpreadsheetImport(input: LocalAdminStore, raw: SpreadsheetWorkbook): SpreadsheetImportPlan {
   const store = parseLocalAdminStore(input), workbook = workbookSchema.parse(raw);

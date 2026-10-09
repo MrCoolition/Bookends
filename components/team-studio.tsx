@@ -20,6 +20,58 @@ const day = (value: string) => Date.parse(`${value}T00:00:00Z`) / 86400000;
 const emptyRole = (plan: EngagementPlan, name = ""): EngagementRole => ({ id: crypto.randomUUID(), name, headcount: 1, allocationPercent: 100, skills: [], responsibilities: "", start: plan.start, end: plan.end, selectedResourceIds: [] });
 const cleanError = (error: unknown) => error instanceof Error ? error.message : "That change couldn’t be saved. Your draft is still here.";
 
+function TeamAssemblyArt() {
+  return <div className="ts-hero-art" aria-hidden="true">
+    <div className="ts-assembly-caption"><span>INDIVIDUAL STRENGTHS.</span><strong>One powerful team.</strong></div>
+    <svg className="ts-assembly" viewBox="0 0 560 350" fill="none" focusable="false">
+      <defs>
+        <filter id="ts-assembly-shadow" x="-30%" y="-50%" width="160%" height="200%"><feGaussianBlur stdDeviation="13"/></filter>
+      </defs>
+      <path d="M89 224 279 123 481 229 290 330Z" fill="#222F68" opacity=".1" filter="url(#ts-assembly-shadow)"/>
+      <g stroke="#CFD4E2" strokeWidth="1">
+        <path d="m54 192 220-116 233 123M54 215l233 123 220-117"/>
+        <path d="m49 189 10 5m210-121 10 6m223 117 10 5M49 212l10 6m223 117 10 5m210-122 10 6"/>
+      </g>
+      <g className="ts-assembly-piece ts-assembly-back" transform="translate(0 -4)">
+        <polygon points="424,142 376,167 376,197 424,172" fill="#1B38C7"/>
+        <polygon points="376,167 280,117 280,147 376,197" fill="#2446DB"/>
+        <polygon points="280,117 232,142 232,172 280,147" fill="#1B38C7"/>
+        <polygon points="232,142 184,117 184,147 232,172" fill="#2446DB"/>
+        <polygon points="280,67 424,142 376,167 280,117 232,142 184,117" fill="#3156F4" stroke="#FFFFFF" strokeOpacity=".24" strokeWidth="1" strokeLinejoin="round"/>
+        <path d="m280 83 21 11-21 11-21-11Z" stroke="#B4C3FF" strokeWidth="2"/>
+      </g>
+      <g className="ts-assembly-piece ts-assembly-middle" transform="translate(0 0)">
+        <polygon points="376,167 328,192 328,222 376,197" fill="#8499E9"/>
+        <polygon points="328,192 280,167 280,197 328,222" fill="#9DAFF3"/>
+        <polygon points="280,167 232,192 232,222 280,197" fill="#8499E9"/>
+        <polygon points="232,192 184,167 184,197 232,222" fill="#9DAFF3"/>
+        <polygon points="280,117 376,167 328,192 280,167 232,192 184,167" fill="#BBC8FF" stroke="#FFFFFF" strokeOpacity=".24" strokeWidth="1" strokeLinejoin="round"/>
+      </g>
+      <g className="ts-assembly-piece ts-assembly-coral" transform="translate(9 -15)">
+        <polygon points="472,167 328,242 328,272 472,197" fill="#CE583E"/>
+        <polygon points="328,242 280,217 280,247 328,272" fill="#DE694C"/>
+        <polygon points="424,142 472,167 328,242 280,217" fill="#F48A70" stroke="#FFFFFF" strokeOpacity=".24" strokeWidth="1" strokeLinejoin="round"/>
+        <path d="m434 159-34 18m42-13-34 18m42-13-34 18" stroke="#FFDFD2" strokeWidth="2" strokeLinecap="round"/>
+      </g>
+      <g className="ts-assembly-piece ts-assembly-ink" transform="translate(-5 4)">
+        <polygon points="232,142 184,167 184,197 232,172" fill="#16223C"/>
+        <polygon points="232,192 184,217 184,247 232,222" fill="#16223C"/>
+        <polygon points="184,217 88,167 88,197 184,247" fill="#1E2A49"/>
+        <polygon points="184,117 232,142 184,167 232,192 184,217 88,167" fill="#26345A" stroke="#FFFFFF" strokeOpacity=".24" strokeWidth="1" strokeLinejoin="round"/>
+        <path d="m162 202 22 12 22-12" stroke="#A9BADB" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      </g>
+      <g className="ts-assembly-piece ts-assembly-front" transform="translate(4 6)">
+        <polygon points="328,192 280,217 280,247 328,222" fill="#1B38C7"/>
+        <polygon points="328,242 280,267 280,297 328,272" fill="#1B38C7"/>
+        <polygon points="280,267 184,217 184,247 280,297" fill="#2446DB"/>
+        <polygon points="280,167 328,192 280,217 328,242 280,267 184,217" fill="#3156F4" stroke="#FFFFFF" strokeOpacity=".24" strokeWidth="1" strokeLinejoin="round"/>
+      </g>
+      <g className="ts-assembly-signal"><circle cx="495" cy="280" r="4" fill="#ED7559"/><path d="M480 280h-34" stroke="#D8DDE8" strokeWidth="1"/></g>
+    </svg>
+    <span className="ts-assembly-footnote"><i/> BUILT TOGETHER. BUILT FOR WHAT’S NEXT.</span>
+  </div>;
+}
+
 export function TeamStudio({ data, save, refresh, onSignOut }: Props) {
   const [screen, setScreen] = useState<"lobby" | "intake" | "brief" | "board">("lobby");
   const [draft, setDraft] = useState<Draft>(blank), [record, setRecord] = useState<AdminMission>();
@@ -156,7 +208,7 @@ export function TeamStudio({ data, save, refresh, onSignOut }: Props) {
     {screen !== "lobby" && <div className="ts-breadcrumb"><button onClick={leave}><ArrowLeft size={15}/> All engagements</button><span>/</span><span>{screen === "intake" ? "SOW intake" : draft.name || "New engagement"}</span><span className="ts-draft-marker">{dirty ? "Unsaved draft" : record ? "Saved team plan" : "New team plan"}</span></div>}
     {error && <div className="ts-error" role="alert" ref={errorRef} tabIndex={-1}><CircleHelp size={20}/><span>{error}</span><button aria-label="Dismiss error" onClick={() => setError("")}><X size={16}/></button></div>}
     {screen === "lobby" ? <>
-      <section className="ts-hero"><div><p className="ts-eyebrow"><span/> THE NEXT CHAPTER STARTS WITH YOUR PEOPLE</p><h1 ref={heading} tabIndex={-1}>Good work.<br/><em>Great chemistry.</em></h1><p className="ts-hero-copy">Turn a client’s ambition into a team that can make it happen. Pick your people. Shape the work. See the whole picture.</p><div className="ts-live-stats"><span><b>{activePlans.length.toString().padStart(2, "0")}</b> engagement plans</span><span><b>{allNamed.toString().padStart(2, "0")}</b> people selected</span><span><b>{portfolioSeats.toString().padStart(2, "0")}</b> open positions</span></div></div><div className="ts-hero-art" aria-hidden="true"><div className="ts-orbit ts-orbit-one"/><div className="ts-orbit ts-orbit-two"/><div className="ts-art-client">THE AMBITION<Flag size={24}/></div><div className="ts-art-center"><span>THE RIGHT</span><strong>people.</strong><UsersRound size={34}/></div><div className="ts-art-skill"><Layers3 size={18}/><span>Skills meet<br/><b>possibility.</b></span></div><span className="ts-art-plus">+</span><span className="ts-art-star">✳</span><div className="ts-art-caption">A little structure.<br/>A lot of possibility.</div></div></section>
+      <section className="ts-hero"><div><p className="ts-eyebrow"><span/> THE NEXT CHAPTER STARTS WITH YOUR PEOPLE</p><h1 ref={heading} tabIndex={-1}>Good work.<br/><em>Great chemistry.</em></h1><p className="ts-hero-copy">Turn a client’s ambition into a team that can make it happen. Pick your people. Shape the work. See the whole picture.</p><div className="ts-live-stats"><span><b>{activePlans.length.toString().padStart(2, "0")}</b> engagement plans</span><span><b>{allNamed.toString().padStart(2, "0")}</b> people selected</span><span><b>{portfolioSeats.toString().padStart(2, "0")}</b> open positions</span></div></div><TeamAssemblyArt /></section>
       <section className="ts-entry-grid" aria-label="Start an engagement"><button className="ts-entry ts-entry-direct" onClick={() => openNew("direct")}><span className="ts-entry-icon"><UsersRound size={27}/></span><span><small>YOU KNOW THE TEAM</small><strong>Build it myself</strong><p>Client, timeframe, roles, people. Straight to the board.</p></span><ArrowRight className="ts-entry-arrow" size={27}/></button><button className="ts-entry ts-entry-sow" onClick={() => openNew("sow")}><span className="ts-entry-icon"><Sparkles size={27}/></span><span><small>LET THE BRIEF DO THE WORK</small><strong>Start from an SOW</strong><p>Bring a document. Get a draft you can make your own.</p></span><ArrowRight className="ts-entry-arrow" size={27}/></button></section>
       <section className="ts-portfolio"><div className="ts-section-heading"><div><p className="ts-eyebrow">YOUR WORK, COMING TOGETHER</p><h2>On the board <span>{data.missions.filter(item => item.active).length}</span></h2></div><div className="ts-filters"><label className="ts-search"><Search size={16}/><input aria-label="Find an engagement" placeholder="Find an engagement" value={search} onChange={event => setSearch(event.target.value)}/></label><select aria-label="Filter by client" value={clientFilter} onChange={event => setClientFilter(event.target.value)}><option value="">All clients</option>{clients.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div></div>
       {visiblePlans.length ? <div className="ts-portfolio-grid">{visiblePlans.map((item, index) => { const itemPlan = item.engagement, summary = itemPlan && summarizePlannedTeam(itemPlan, data.resources); return <button key={item.id} className={`ts-plan-card ts-color-${index % 4}`} onClick={() => openPlan(item)}><div className="ts-plan-top"><span>{data.clients.find(c => c.id === item.clientId)?.name}</span><span>{itemPlan?.source === "direct" ? "Direct plan" : itemPlan?.status === "signed" ? "Signed SOW" : "Draft"}</span></div><h3>{item.name}</h3><p>{itemPlan ? `${dateLabel(itemPlan.start, true)} — ${dateLabel(itemPlan.end, true)}` : "Add the timeframe and team"}</p><div className="ts-plan-seats">{Array.from({ length: Math.min(summary?.totalSeats ?? 4, 12) }, (_, i) => <span key={i} className={i < (summary?.namedSeats ?? 0) ? "filled" : ""}>{i < (summary?.namedSeats ?? 0) ? <Check size={14}/> : <Plus size={13}/>}</span>)}{(summary?.totalSeats ?? 0) > 12 && <small>+{summary!.totalSeats - 12}</small>}</div><div className="ts-plan-bottom"><span><b>{summary?.namedSeats ?? 0}</b> selected <i>·</i> <b>{summary?.openSeats ?? 0}</b> open</span><ArrowRight size={20}/></div></button>; })}</div> : <div className="ts-empty-board"><span className="ts-empty-symbol">[ + ]</span><h3>{search || clientFilter ? "No plans in this view." : "Your next great team belongs here."}</h3><p>{search || clientFilter ? "Try a different client or search." : "Start with the people you already know, or let an SOW give you a head start."}</p>{!search && !clientFilter && <button className="ts-text-button" onClick={() => openNew("direct")}>Build your first team <ArrowRight size={16}/></button>}</div>}</section>

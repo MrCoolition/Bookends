@@ -83,6 +83,17 @@ test("role matches use recorded business skills and roles without inventing avai
   assert.equal(profileSchema.safeParse({ roles: [], skills: [], grants: ["administrator"] }).success, false);
 });
 
+test("person designations are optional, explicit and independent of delivery roles and skills", () => {
+  const legacy = { roles: ["Data Engineer"], skills: ["SQL"] };
+  assert.deepEqual(profileSchema.parse(legacy), legacy);
+  for (const affiliation of ["impower", "contractor"] as const) assert.deepEqual(profileSchema.parse({ ...legacy, affiliation }), { ...legacy, affiliation });
+  for (const affiliation of ["W2", "1099", "manager", "", null]) assert.equal(profileSchema.safeParse({ ...legacy, affiliation }).success, false);
+  let store = applyLocalAdminCommand(createLocalAdminStore(), { type: "save_resource", name: "Taylor Example", home: "", ownerId: "", profile: { ...legacy, affiliation: "contractor" } });
+  const person = store.data.resources[0];
+  store = applyLocalAdminCommand(store, { type: "save_resource", id: person.id, expectedRevision: person.revision, name: "Taylor Updated", home: "", ownerId: "" });
+  assert.deepEqual(parseLocalAdminStore(JSON.stringify(store)).data.resources[0].profile, { ...legacy, affiliation: "contractor" });
+});
+
 test("configurable roles and skills retain rename history, reject ambiguous names and import legacy backups", () => {
   const legacy = localFixture(); delete legacy.data.capabilities;
   assert.deepEqual(parseLocalAdminStore(legacy).data.capabilities, []);

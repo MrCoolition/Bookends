@@ -71,7 +71,7 @@ const color = { paper: '#F8F6F1', white: '#FFFFFF', ink: '#20283F', muted: '#657
 const sheetSpecs = [
   { name: 'HOMEs', title: 'HOMEs', note: 'Enter one HOME per row. The first two columns are required.', headers: ['HOME code', 'HOME name', 'Description'], widths: [26, 38, 64] },
   { name: 'Clients', title: 'Clients', note: 'Enter one client per row. The first two columns are required.', headers: ['Client code', 'Client name', 'Contact name', 'Contact email', 'Notes'], widths: [22, 34, 28, 37, 48] },
-  { name: 'People', title: 'People', note: 'Only name is required. HOME and owner are optional. Separate delivery roles and skills with semicolons.', headers: ['Person name', 'HOME code', 'Owner name', 'Delivery roles', 'Skills'], widths: [32, 22, 28, 43, 48], required: [0] },
+  { name: 'People', title: 'People', note: 'Only name is required. Designation: Impower or Contractor; blank means not set. Separate roles and skills with semicolons.', headers: ['Person name', 'HOME code', 'Owner name', 'Delivery roles', 'Skills', 'Designation'], widths: [32, 22, 28, 43, 48, 22], required: [0] },
   { name: 'Missions', title: 'Missions', note: 'Enter one mission per row. Both columns are required.', headers: ['Mission name', 'Client code'], widths: [58, 48] },
   { name: 'Engagements', title: 'Engagements / SOWs', note: 'One SOW engagement per row. Add its team on Engagement roles. Dates include the last day.', headers: ['Engagement name', 'Client code', 'SOW reference', 'Status', 'Signed on', 'Start date', 'End date', 'Outcomes'], widths: [35, 20, 26, 18, 18, 18, 18, 54], required: [0,1,5,6] },
   { name: 'Engagement roles', title: 'Engagement roles / your delivery team', note: 'One row per role. Enter allocation as 100 for full-time or 50 for half-time. Blank dates use engagement dates.', headers: ['Engagement name', 'Client code', 'Role name', 'Headcount', 'Allocation %', 'Skills', 'Responsibilities', 'Start date', 'End date'], widths: [35, 20, 30, 17, 20, 44, 60, 18, 18], required: [0,1,2,3,4] },
@@ -115,8 +115,8 @@ guide.getRange('B14').values = [['Input area']];
 guide.getRange('C14').values = [['Start in row 5. Up to 1,000 rows per tab. Blank rows are skipped.']];
 guide.getRange('B15').values = [['Keep the structure']];
 guide.getRange('C15').values = [['Keep sheet names and row 4 headers unchanged. Paste values only.']];
-guide.getRange('B16').values = [['Local setup']];
-guide.getRange('C16').values = [['Imports configure this browser workspace. They do not create sign-in accounts.']];
+guide.getRange('B16').values = [['Workspace setup']];
+guide.getRange('C16').values = [['Imports update your workspace. They do not create sign-in accounts.']];
 guide.getRange('B11:B16').format.font = { name: 'Arial', size: 11, bold: true, color: color.ink };
 guide.getRange('B18').values = [['Fictional examples']];
 guide.getRange('C18').values = [['For reference only. This guide tab is never imported.']];
@@ -173,8 +173,8 @@ guide.getRange('B44').values = [['Required team']];
 guide.getRange('C44').values = [['Every engagement needs at least one role. Skills use semicolons or commas.']];
 guide.getRange('B45').values = [['Earlier workbooks']];
 guide.getRange('C45').values = [['Missions is supported for names only. Use Engagements for SOWs and team demand.']];
-guide.getRange('B46').values = [['Optional columns']];
-guide.getRange('C46').values = [['Other optional blanks clear values. Omit columns to keep them. Rename in Admin.']];
+guide.getRange('B46').values = [['Designation / blanks']];
+guide.getRange('C46').values = [['Impower or Contractor. Optional blanks clear values; omit columns to keep them.']];
 guide.getRange('B35:B46').format.font = { name: 'Arial', size: 11, bold: true, color: color.ink };
 guide.getRange('C35:E46').format.font.color = color.muted;
 guide.getRange('B48').values = [['Your role and skills catalog']];
@@ -227,6 +227,7 @@ for (const spec of sheetSpecs) {
 workbook.names.add('BookendsHomeCodes', "='HOMEs'!$A$5:$A$1004");
 workbook.names.add('BookendsClientCodes', "='Clients'!$A$5:$A$1004");
 workbook.worksheets.getItem('People').getRange('B5:B1004').dataValidation = { rule: { type: 'list', formula1: 'BookendsHomeCodes' } };
+workbook.worksheets.getItem('People').getRange('F5:F1004').dataValidation = { rule: { type: 'list', values: ['Impower', 'Contractor'] } };
 workbook.worksheets.getItem('Missions').getRange('B5:B1004').dataValidation = { rule: { type: 'list', formula1: 'BookendsClientCodes' } };
 workbook.worksheets.getItem('Engagements').getRange('B5:B1004').dataValidation = { rule: { type: 'list', formula1: 'BookendsClientCodes' } };
 workbook.worksheets.getItem('Engagement roles').getRange('B5:B1004').dataValidation = { rule: { type: 'list', formula1: 'BookendsClientCodes' } };

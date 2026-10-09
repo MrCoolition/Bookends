@@ -82,6 +82,39 @@ test("blank People relationships preserve existing links and identity instead of
   assert.equal(plan.changes[0].fields?.length, 1);
 });
 
+test("People designation imports accept explicit choices, preserve omitted columns and preview clearing", () => {
+  let store = createLocalAdminStore();
+  const workbook: SpreadsheetWorkbook = { sheets: [sheet("People", [["Avery Example", "Data Engineer", "SQL", "Impower"], ["Taylor Example", "BA", "Testing", "CONTRACTOR"], ["Morgan Example", "", "", ""]], ["Person name", "Delivery roles", "Skills", "Designation"])] };
+  const plan = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(plan.errors, []);
+  store = applySpreadsheetImport(store, plan);
+  assert.deepEqual(store.data.resources.map(person => person.profile?.affiliation), ["impower", "contractor", undefined]);
+  const olderWorkbook: SpreadsheetWorkbook = { sheets: [sheet("People", [["Avery Example", "Data Modeler", "Python"]], ["Person name", "Delivery roles", "Skills"])] };
+  store = applySpreadsheetImport(store, planSpreadsheetImport(store, olderWorkbook));
+  assert.deepEqual(store.data.resources[0].profile, { roles: ["Data Modeler"], skills: ["Python"], affiliation: "impower" });
+  const designationOnly: SpreadsheetWorkbook = { sheets: [sheet("People", [["Avery Example", "Contractor"]], ["Person name", "Designation"])] };
+  const update = planSpreadsheetImport(store, designationOnly);
+  assert.match(update.changes[0].fields![0].before, /Impower/);
+  assert.match(update.changes[0].fields![0].after, /Contractor/);
+  store = applySpreadsheetImport(store, update);
+  assert.deepEqual(store.data.resources[0].profile, { roles: ["Data Modeler"], skills: ["Python"], affiliation: "contractor" });
+  const clear: SpreadsheetWorkbook = { sheets: [sheet("People", [["Avery Example", ""]], ["Person name", "Designation"])] };
+  const clearing = planSpreadsheetImport(store, clear);
+  assert.match(clearing.changes[0].fields![0].after, /Not designated/);
+  store = applySpreadsheetImport(store, clearing);
+  assert.deepEqual(store.data.resources[0].profile, { roles: ["Data Modeler"], skills: ["Python"] });
+});
+
+test("invalid People designations block the workbook without inferring employee types", () => {
+  const store = createLocalAdminStore();
+  for (const designation of ["W2", "1099", "Manager", "Employee"]) {
+    const plan = planSpreadsheetImport(store, { sheets: [sheet("People", [["Avery Example", designation]], ["Person name", "Designation"])] });
+    assert.ok(plan.errors.some(error => error.sheet === "People" && error.field === "Designation"));
+    assert.throws(() => applySpreadsheetImport(store, plan));
+  }
+  assert.equal(store.data.resources.length, 0);
+});
+
 test("blank People relationships retain duplicate and supplied-reference protection", () => {
   let store = imported();
   store = applyLocalAdminCommand(store, { type: "save_home", code: "Apps", name: "Application delivery", description: "" });
@@ -147,6 +180,7 @@ async function templateFile() { return new File([new Uint8Array(await readFile(t
 test("actual blank Excel template parses quickly without importing its 1000 formatted empty rows", async () => {
   const workbook=await readSpreadsheetFile(await templateFile());
   assert.deepEqual(workbook.sheets.map(sheet=>sheet.name),["HOMEs","Clients","People","Missions","Engagements","Engagement roles","Roles","Skills"]);
+  assert.deepEqual(workbook.sheets.find(sheet => sheet.name === "People")!.rows[3], [...SPREADSHEET_HEADERS.People]);
   const plan=planSpreadsheetImport(createLocalAdminStore(),workbook);
   assert.deepEqual(plan.errors,[]);assert.deepEqual(plan.counts,{adds:0,updates:0,skips:0});
 });

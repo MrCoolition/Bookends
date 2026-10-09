@@ -20,6 +20,8 @@ export function capabilityAliasesAfterRename(record: AdminCapability | null, nam
 export const profileSchema = z.object({
   roles: z.array(text(160)).max(30).refine(distinct, "List each delivery role once."),
   skills: z.array(text(100)).max(100).refine(distinct, "List each skill once."),
+  /** Team designation only. Omission leaves it unassigned, without inferring employment or reporting relationships. */
+  affiliation: z.enum(["impower", "contractor"]).optional(),
 }).strict();
 export type ResourceProfile = z.infer<typeof profileSchema>;
 

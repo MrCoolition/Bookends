@@ -215,7 +215,7 @@ test("SOW plans and delivery profiles persist with revisions, safe legacy edits 
   mission = (await f.load()).missions[0];
   assert.deepEqual(mission.engagement, engagement); assert.equal(mission.revision, 2);
   await assert.rejects(f.execute({ type: "save_mission", id: mission.id, expectedRevision: 1, name: "Stale", clientId: client.id, engagement }), code("conflict"));
-  const profile = { roles: ["BA / PM"], skills: ["Agile", "Requirements", "Testing"] };
+  const profile = { roles: ["BA / PM"], skills: ["Agile", "Requirements", "Testing"], affiliation: "impower" as const };
   await f.execute({ type: "save_resource", id: f.resourceId, expectedRevision: 1, name: "Synthetic teammate", home: "Data", ownerId: f.admin.id, profile });
   await f.execute({ type: "save_resource", id: f.resourceId, expectedRevision: 2, name: "Renamed teammate", home: "Data", ownerId: f.admin.id });
   const resource = (await f.load()).resources[0];

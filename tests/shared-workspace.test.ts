@@ -105,6 +105,26 @@ test("shared planning persists individual people without assigning HOME or owner
   assert.deepEqual(await scoped("main", query => loadSharedStore(query, "main")), restored);
 });
 
+test("shared person designation persists across sessions and backup restore, and can be changed or cleared", async () => {
+  let saved = await scoped("main", query => loadSharedStore(query, "main"));
+  const command = { type: "save_resource", name: "Designation teammate", home: "", ownerId: "", profile: { roles: ["Data Engineer"], skills: ["SQL"], affiliation: "impower" } };
+  saved = await scoped("main", query => saveSharedStore(query, session, { expectedRevision: saved.revision, command }, "command"));
+  const resourceId = saved.data.resources.find(person => person.name === command.name)!.id;
+  const reloaded = await scoped("main", query => loadSharedStore(query, "main"));
+  assert.equal(reloaded.data.resources.find(person => person.id === resourceId)!.profile!.affiliation, "impower");
+  const roundTrip = JSON.parse(JSON.stringify(saved));
+  saved = await scoped("main", query => saveSharedStore(query, session, { expectedRevision: saved.revision, store: roundTrip }, "snapshot"));
+  assert.equal(saved.data.resources.find(person => person.id === resourceId)!.profile!.affiliation, "impower");
+  for (const affiliation of ["contractor", undefined] as const) {
+    const person = saved.data.resources.find(resource => resource.id === resourceId)!;
+    const profile = { roles: ["Data Engineer", "Data Modeler"], skills: ["SQL", "Python"], ...(affiliation ? { affiliation } : {}) };
+    saved = await scoped("main", query => saveSharedStore(query, session, { expectedRevision: saved.revision, command: { ...command, id: person.id, expectedRevision: person.revision, profile } }, "command"));
+    assert.deepEqual((await scoped("main", query => loadSharedStore(query, "main"))).data.resources.find(resource => resource.id === resourceId)!.profile, profile);
+  }
+  await assert.rejects(scoped("main", query => saveSharedStore(query, session, { expectedRevision: saved.revision, command: { ...command, profile: { ...command.profile, affiliation: "W2" } } }, "command")));
+  assert.deepEqual(await scoped("main", query => loadSharedStore(query, "main")), saved);
+});
+
 test("shared tables deny missing and foreign scope, deletes, audit edits and identity access", async () => {
   assert.deepEqual((await scoped("", query => query.query("SELECT workspace_id FROM be_shared_workspaces"))).rows, []);
   assert.deepEqual((await scoped("other", query => query.query("SELECT workspace_id FROM be_shared_workspaces"))).rows, []);
