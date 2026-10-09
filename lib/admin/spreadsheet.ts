@@ -2,22 +2,23 @@ import { z } from "zod";
 import { adminRequestSchema } from "./validation";
 import { LOCAL_ADMIN_OWNER_ID, parseLocalAdminCommand, parseLocalAdminStore, type LocalAdminStore } from "./local";
 import type { AdminCapability, AdminClient, AdminHome, AdminMission, AdminResource } from "./contracts";
-import { capabilityNameKey, engagementPlanSchema, type EngagementPlan, type EngagementRole, type ResourceProfile } from "./engagement";
+import { capabilityAliasesAfterRename, capabilityNameKey, engagementPlanSchema, type EngagementPlan, type EngagementRole, type ResourceProfile } from "./engagement";
 import { formatNamedList, parseNamedList } from "./named-list";
 
 export const MAX_SPREADSHEET_BYTES = 5 * 1024 * 1024;
 const MAX_UNCOMPRESSED_BYTES = 20 * 1024 * 1024;
 const MAX_ROWS = 1004, MAX_COLUMNS = 64, MAX_RECORDS = 1000;
 export const SPREADSHEET_HEADERS = {
-  HOMEs: ["HOME code", "HOME name", "Description"],
-  Clients: ["Client code", "Client name", "Contact name", "Contact email", "Notes"],
-  People: ["Person name", "HOME code", "Owner name", "Delivery roles", "Skills", "Designation"],
-  Missions: ["Mission name", "Client code"],
-  Engagements: ["Engagement name", "Client code", "SOW reference", "Status", "Signed on", "Start date", "End date", "Outcomes"],
-  "Engagement roles": ["Engagement name", "Client code", "Role name", "Headcount", "Allocation %", "Skills", "Responsibilities", "Start date", "End date"],
-  Roles: ["Name", "Description"],
-  Skills: ["Name", "Description"],
+  HOMEs: ["HOME code", "HOME name", "Description", "Record ID", "Revision", "Active"],
+  Clients: ["Client code", "Client name", "Contact name", "Contact email", "Notes", "Record ID", "Revision", "Active"],
+  People: ["Person name", "HOME code", "Owner name", "Delivery roles", "Skills", "Designation", "Record ID", "Revision", "Active"],
+  Missions: ["Mission name", "Client code", "Record ID", "Revision", "Active"],
+  Engagements: ["Engagement name", "Client code", "SOW reference", "Status", "Signed on", "Start date", "End date", "Outcomes", "Source", "Record ID", "Revision", "Active"],
+  "Engagement roles": ["Engagement name", "Client code", "Role name", "Headcount", "Allocation %", "Skills", "Responsibilities", "Start date", "End date", "Role ID", "Engagement ID", "Revision", "Selected people IDs"],
+  Roles: ["Name", "Description", "Record ID", "Revision", "Active"],
+  Skills: ["Name", "Description", "Record ID", "Revision", "Active"],
 } as const;
+export const SPREADSHEET_REFERENCE_SHEETS = ["Workspace", "Members", "Playbooks", "Requirements", "SOW notes", "Team selections"] as const;
 export type SpreadsheetSheetName = keyof typeof SPREADSHEET_HEADERS;
 export type SpreadsheetCell = string | number | boolean | null | { formula: string } | { unsupported: string };
 export type SpreadsheetIssue = { sheet: string; row: number; field: string; message: string };
@@ -51,6 +52,7 @@ function columnName(index: number) {
 }
 function nonblank(cell: SpreadsheetCell | undefined) { return cell !== undefined && cell !== null && !(typeof cell === "string" && !cell.trim()); }
 function isDataSheet(name: string): name is SpreadsheetSheetName { return Object.hasOwn(SPREADSHEET_HEADERS, name); }
+function isReferenceSheet(name: string) { return (SPREADSHEET_REFERENCE_SHEETS as readonly string[]).includes(name); }
 type ImportedRow = { sheet: SpreadsheetSheetName; row: number; values: Map<string, string>; columns: Set<string> };
 function requiredHeaders(name: SpreadsheetSheetName): readonly string[] {
   if (name === "People") return ["Person name"];
@@ -63,9 +65,9 @@ function mapRows(workbook: SpreadsheetWorkbook, errors: SpreadsheetIssue[]): Imp
   const result: ImportedRow[] = [], seen = new Set<string>();
   let recognized = 0;
   for (const sheet of workbook.sheets) {
-    if (sheet.name === "Start here") continue;
+    if (sheet.name === "Start here" || isReferenceSheet(sheet.name)) continue;
     if (!isDataSheet(sheet.name)) {
-      if (sheet.rows.some(row => row.some(nonblank))) errors.push({ sheet: sheet.name, row: 1, field: "Sheet name", message: "Use HOMEs, Clients, People, Engagements, Engagement roles, Roles, Skills, or Missions for import data. Start here is the only ignored instruction sheet." });
+      if (sheet.rows.some(row => row.some(nonblank))) errors.push({ sheet: sheet.name, row: 1, field: "Sheet name", message: "Use HOMEs, Clients, People, Engagements, Engagement roles, Roles, Skills, or Missions for import data. Start here and the labeled workspace reference sheets are not imported." });
       continue;
     }
     recognized++;
@@ -98,7 +100,7 @@ function mapRows(workbook: SpreadsheetWorkbook, errors: SpreadsheetIssue[]): Imp
         if (!nonblank(value)) { if (header) values.set(header, ""); return; }
         if (!header || col >= MAX_COLUMNS) { issue(index + 1, typeof rawHeaders[col] === "string" && rawHeaders[col]!.trim() ? String(rawHeaders[col]) : columnName(col), "This populated column is not part of the import format. Move its data to a supported column or remove it."); return; }
         if (typeof value === "object") { issue(index + 1, header, value && "formula" in value ? "Replace this formula with a plain value before importing; cached formula results are not imported." : "Use a plain text value here; dates, hyperlinks, and errors are not imported."); return; }
-        if (typeof value === "boolean") { issue(index + 1, header, "Use a name or code as plain text here."); return; }
+        if (typeof value === "boolean" && header !== "Active") { issue(index + 1, header, "Use a name or code as plain text here."); return; }
         values.set(header, String(value).trim());
       });
       for (const header of required) if (!values.get(header)) issue(index + 1, header, "This value is required for every populated row.");
@@ -128,19 +130,44 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
     const catalogKey = key(item.kind, name); capabilities.set(catalogKey, [...(capabilities.get(catalogKey) ?? []), item]);
   }
   const engagementRows = new Map<string, ImportedRow>(), roleRows = new Map<string, ImportedRow>(), touchedEngagements = new Set<string>();
+  const originalRecords = new Map([...store.data.homes, ...store.data.clients, ...store.data.resources, ...store.data.missions, ...(store.data.capabilities ?? [])].map(record => [record.id, record]));
+  const seenRecordIds = new Map<string, number>(), seenRoleIds = new Map<string, number>();
   const rowIssue = (row: ImportedRow, field: string, message: string) => errors.push({ sheet: row.sheet, row: row.row, field, message });
   function listCell(row: ImportedRow, field: string, value: string) {
     const parsed = parseNamedList(value);
     if (parsed.error) { rowIssue(row, field, parsed.error); return null; }
     return parsed.values;
   }
-  function identify<T extends { active: boolean }>(row: ImportedRow, rowKey: string, records: Map<string, T[]>, field: string): { existing?: T; valid: boolean } {
-    const importKey = key(row.sheet === "Engagements" ? "Missions" : row.sheet, rowKey), first = seen.get(importKey);
+  function validRevision(row: ImportedRow, recordId: string) {
+    const supplied = row.values.get("Revision") ?? "", original = originalRecords.get(recordId);
+    if (!/^[1-9]\d*$/.test(supplied) || !original || Number(supplied) !== original.revision) {
+      rowIssue(row, "Revision", "This row is missing its original revision or has changed since export. Export fresh data before editing this record."); return false;
+    }
+    return true;
+  }
+  function activeValue(row: ImportedRow, existing?: { active: boolean }) {
+    const supplied = row.values.get("Active")?.toLocaleLowerCase("en-US");
+    return supplied ? supplied === "true" : existing?.active ?? true;
+  }
+  function identify<T extends { id: string; revision: number; active: boolean }>(row: ImportedRow, rowKey: string, records: Map<string, T[]>, field: string): { existing?: T; valid: boolean } {
+    const recordId = row.values.get("Record ID"), active = row.values.get("Active")?.toLocaleLowerCase("en-US");
+    if (active && active !== "true" && active !== "false") { rowIssue(row, "Active", "Use TRUE or FALSE, or leave blank to keep the existing status."); return { valid: false }; }
+    if (!recordId && row.values.get("Revision")) { rowIssue(row, "Record ID", "Keep the Record ID with its revision. For a new record, leave both cells blank."); return { valid: false }; }
+    const importKey = key(row.sheet === "Engagements" ? "Missions" : row.sheet, recordId || rowKey), first = seen.get(importKey);
     if (first !== undefined) { rowIssue(row, field, `This key is already listed on row ${first}. Keep one row for each record.`); return { valid: false }; }
     seen.set(importKey, row.row);
-    const found = records.get(rowKey) ?? [];
+    const found = recordId ? [...new Map([...records.values()].flat().filter(record => record.id === recordId).map(record => [record.id, record])).values()] : records.get(rowKey) ?? [];
+    if (recordId && !found.length) { rowIssue(row, "Record ID", "This Record ID does not belong to an existing record on this sheet. Keep exported IDs unchanged; leave ID and revision blank for a new record."); return { valid: false }; }
     if (found.length > 1) { rowIssue(row, field, "More than one existing record matches this name and scope. Resolve the duplicate records before importing."); return { valid: false }; }
-    if (found[0] && !found[0].active) { rowIssue(row, field, "This record is archived. Reactivate it in Administration before importing changes."); return { valid: false }; }
+    if (found[0]) {
+      if (recordId && (row.sheet === "Roles" || row.sheet === "Skills") && "kind" in found[0] && found[0].kind !== (row.sheet === "Roles" ? "role" : "skill")) { rowIssue(row, "Record ID", "This Record ID belongs to a different catalog kind. Keep roles on Roles and skills on Skills."); return { valid: false }; }
+      const firstRow = seenRecordIds.get(found[0].id);
+      if (firstRow !== undefined) { rowIssue(row, field, `Another row already matches this record on row ${firstRow}. Keep one row per record.`); return { valid: false }; }
+      seenRecordIds.set(found[0].id, row.row);
+      if (recordId && !validRevision(row, recordId)) return { valid: false };
+      if (!recordId && !found[0].active) { rowIssue(row, field, "This record is archived. Export its Record ID and Revision to edit it, or reactivate it in Administration."); return { valid: false }; }
+      if (recordId && (row.sheet === "Clients" || row.sheet === "HOMEs") && "code" in found[0] && found[0].code !== rowKey) { rowIssue(row, field, "Codes are permanent identifiers. Keep the exported code unchanged and edit the display name instead."); return { valid: false }; }
+    }
     return { existing: found[0], valid: true };
   }
   function validate(row: ImportedRow, command: unknown, fields: Record<string, string>) {
@@ -164,16 +191,19 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
     return true;
   }
   function merge<T extends { id: string; revision: number; active: boolean }>(row: ImportedRow, existing: T | undefined, values: Omit<T, "id" | "revision" | "active">, records: T[], map: Map<string, T[]>, rowKey: string, label: string) {
+    const updated = { ...values, active: activeValue(row, existing) };
     if (existing) {
-      if (!changed(existing, values as Partial<T>)) { changes.push({ sheet: row.sheet, row: row.row, action: "skip", label }); return; }
+      if (!changed(existing, updated as Partial<T>)) { changes.push({ sheet: row.sheet, row: row.row, action: "skip", label }); return; }
       const fieldLabels: Record<string, string> = { name: row.sheet === "HOMEs" ? "HOME name" : row.sheet === "Clients" ? "Client name" : row.sheet === "People" ? "Person name" : row.sheet === "Roles" || row.sheet === "Skills" ? "Name" : "Mission name", code: row.sheet === "HOMEs" ? "HOME code" : "Client code", description: "Description", contactName: "Contact name", contactEmail: "Contact email", notes: "Notes", home: "HOME code", ownerId: "Owner name", clientId: "Client code" };
       const display = (field: string, value: unknown) => field === "ownerId" ? value ? data.members.find(member => member.id === value)?.name ?? "Unavailable owner" : "No owner" : field === "clientId" ? data.clients.find(client => client.id === value)?.code ?? "Unavailable client" : field === "engagement" && value ? describeEngagement(value as EngagementPlan) : field === "profile" ? describeProfile(value as ResourceProfile | undefined) : String(value ?? "");
-      const fields = Object.entries(values).filter(([field, value]) => !equal(existing[field as keyof T], value)).map(([field, value]) => ({ field: field === "engagement" ? "SOW and delivery dates" : field === "profile" ? "Designation, delivery roles and skills" : fieldLabels[field] ?? field, before: display(field, existing[field as keyof T]), after: display(field, value) }));
-      Object.assign(existing, values); existing.revision++;
+      const fields = Object.entries(updated).filter(([field, value]) => !equal(existing[field as keyof T], value)).map(([field, value]) => ({ field: field === "engagement" ? "SOW and delivery dates" : field === "profile" ? "Designation, delivery roles and skills" : field === "active" ? "Active" : fieldLabels[field] ?? field, before: display(field, existing[field as keyof T]), after: display(field, value) }));
+      Object.assign(existing, updated); existing.revision++;
+      if (row.sheet !== "Roles" && row.sheet !== "Skills") for (const [oldKey, records] of map) if (oldKey !== rowKey && records.includes(existing)) map.set(oldKey, records.filter(record => record.id !== existing.id));
+      map.set(rowKey, [...(map.get(rowKey) ?? []).filter(record => record.id !== existing.id), existing]);
       changes.push({ sheet: row.sheet, row: row.row, action: "update", label, fields });
     } else {
       if (records.length >= MAX_RECORDS) { rowIssue(row, "Row", "This import would exceed the 1,000-record limit for this section."); return; }
-      const record = { ...values, id: crypto.randomUUID(), revision: 1, active: true } as T;
+      const record = { ...updated, id: crypto.randomUUID(), revision: 1 } as T;
       records.push(record); map.set(rowKey, [record]);
       changes.push({ sheet: row.sheet, row: row.row, action: "add", label });
     }
@@ -186,9 +216,11 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
       const found = identify(row, catalogKey, capabilities, "Name"); if (!found.valid) continue;
       if (found.existing && catalogSeen.has(found.existing.id)) { rowIssue(row, "Name", "Another row already matches this catalog item, possibly through an earlier name. Keep one row per item."); continue; }
       if (found.existing) catalogSeen.add(found.existing.id);
-      const fields = { kind, name: found.existing?.name ?? value("Name"), description: row.columns.has("Description") ? value("Description") : found.existing?.description ?? "" };
+      const fields = { kind, name: value("Record ID") ? value("Name") : found.existing?.name ?? value("Name"), description: row.columns.has("Description") ? value("Description") : found.existing?.description ?? "" };
       if (!validate(row, { type: "save_capability", ...fields }, { name: "Name", description: "Description" })) continue;
-      merge<AdminCapability>(row, found.existing, fields, catalogRecords, capabilities, catalogKey, `${fields.name} · ${kind}`);
+      const renamed = found.existing && found.existing.name !== fields.name;
+      const aliases = renamed ? { aliases: capabilityAliasesAfterRename(found.existing!, fields.name) } : {};
+      merge<AdminCapability>(row, found.existing, { ...fields, ...aliases }, catalogRecords, capabilities, catalogKey, `${fields.name} · ${kind}`);
     } else if (name === "HOMEs") {
       const code = value("HOME code"), found = identify(row, code, homes, "HOME code"); if (!found.valid) continue;
       const fields = { code, name: value("HOME name"), description: row.columns.has("Description") ? value("Description") : found.existing?.description ?? "" };
@@ -200,18 +232,21 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
       if (!validate(row, { type: "save_client", ...fields }, { code: "Client code", name: "Client name", contactName: "Contact name", contactEmail: "Contact email", notes: "Notes" })) continue;
       merge<AdminClient>(row, found.existing, fields, data.clients, clients, code, `${fields.name} · ${code}`);
     } else if (name === "People") {
-      const suppliedHome = value("HOME code"), personName = value("Person name");
+      const suppliedHome = value("HOME code"), personName = value("Person name"), recordId = value("Record ID");
+      const identifiedPerson = recordId ? data.resources.find(person => person.id === recordId) : undefined;
       const sameNameRows = rows.filter(item => item.sheet === "People" && item.values.get("Person name") === personName);
-      if (sameNameRows.length > 1 && sameNameRows.some(item => !item.values.get("HOME code"))) { rowIssue(row, "Person name", "This name appears more than once with a blank HOME. Keep one row for this person, or supply distinct HOME codes for different people with the same name."); continue; }
+      if (!recordId && sameNameRows.length > 1 && sameNameRows.some(item => !item.values.get("HOME code"))) { rowIssue(row, "Person name", "This name appears more than once with a blank HOME. Keep one row for this person, or supply distinct HOME codes for different people with the same name."); continue; }
       const namedPeople = data.resources.filter(person => person.name === personName);
-      if (!suppliedHome && namedPeople.length > 1) { rowIssue(row, "Person name", "More than one existing person has this name. Supply the HOME code to identify the intended person, or resolve duplicates in Administration."); continue; }
-      // Blank relationships never remove established links. A new person may
-      // remain ungrouped and unowned; an existing unique name keeps its identity.
-      const home = suppliedHome || namedPeople[0]?.home || "", personKey = key(personName, home);
+      if (!recordId && !suppliedHome && namedPeople.length > 1) { rowIssue(row, "Person name", "More than one existing person has this name. Supply the HOME code to identify the intended person, or resolve duplicates in Administration."); continue; }
+      // Legacy name-matched imports preserve blank relationships. Exported IDs
+      // identify the person even when HOME or owner is intentionally cleared.
+      const home = recordId ? row.columns.has("HOME code") ? suppliedHome : identifiedPerson?.home ?? "" : suppliedHome || namedPeople[0]?.home || "", personKey = key(personName, home);
       const found = identify(row, personKey, people, "Person name"); if (!found.valid) continue;
-      if (home && !homes.get(home)?.[0]?.active) { rowIssue(row, "HOME code", "Choose an active HOME code already in the workspace or included on the HOMEs sheet."); continue; }
+      const personActive = activeValue(row, found.existing), linkedHome = homes.get(home)?.[0];
+      if (home && (!linkedHome || personActive && !linkedHome.active)) { rowIssue(row, "HOME code", "Choose an active HOME code already in the workspace or included on the HOMEs sheet."); continue; }
       const ownerName = value("Owner name");
-      const owners = ownerName ? data.members.filter(member => member.active && member.name === ownerName) : [];
+      const currentOwner = found.existing ? data.members.find(member => member.id === found.existing!.ownerId) : undefined;
+      const owners = currentOwner?.name === ownerName && (!personActive || currentOwner.active) ? [currentOwner] : ownerName ? data.members.filter(member => member.active && member.name === ownerName) : [];
       if (ownerName && owners.length !== 1) { rowIssue(row, "Owner name", "Owner name must match exactly one active local member. Resolve missing or duplicate names in Administration."); continue; }
       const current = found.existing?.profile;
       const roles = row.columns.has("Delivery roles") ? listCell(row, "Delivery roles", value("Delivery roles")) : current?.roles ?? [];
@@ -221,25 +256,43 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
       if (designation && designation !== "impower" && designation !== "contractor") { rowIssue(row, "Designation", "Choose Impower or Contractor, or leave blank for no designation."); continue; }
       const profile: ResourceProfile = { roles, skills };
       if (designation === "impower" || designation === "contractor") profile.affiliation = designation;
-      const fields = { name: personName, home, ownerId: owners[0]?.id ?? found.existing?.ownerId ?? "", ...(row.columns.has("Delivery roles") || row.columns.has("Skills") || row.columns.has("Designation") ? { profile } : {}) };
+      const includeProfile = (row.columns.has("Delivery roles") || row.columns.has("Skills") || row.columns.has("Designation")) && (!!current || roles.length > 0 || skills.length > 0 || !!designation);
+      const ownerId = owners[0]?.id ?? (recordId && row.columns.has("Owner name") ? "" : found.existing?.ownerId ?? "");
+      const fields = { name: personName, home, ownerId, ...(includeProfile ? { profile } : {}) };
       if (!validate(row, { type: "save_resource", ...fields }, { name: "Person name", home: "HOME code", ownerId: "Owner name", profile: "Delivery roles and skills" })) continue;
       merge<AdminResource>(row, found.existing, fields, data.resources, people, personKey, home ? `${personName} · ${home}` : personName);
     } else if (name === "Engagement roles") {
       const clientCode = value("Client code"), missionName = value("Engagement name"), roleName = value("Role name"), missionKey = key(missionName, clientCode);
-      const found = missions.get(missionKey) ?? [], mission = found[0];
-      if (found.length !== 1 || !mission?.active || !mission.engagement) { rowIssue(row, "Engagement name", "Match one active engagement with SOW details, using its exact name and client code. Add it on the Engagements sheet first."); continue; }
+      const engagementId = value("Engagement ID"), roleId = value("Role ID");
+      const found = engagementId ? data.missions.filter(item => item.id === engagementId) : missions.get(missionKey) ?? [], mission = found[0];
+      if (roleId && !engagementId) { rowIssue(row, "Engagement ID", "Keep the Engagement ID with its Role ID so the role stays on the correct team."); continue; }
+      if (found.length !== 1 || !mission?.engagement || (!engagementId && !mission.active)) { rowIssue(row, engagementId ? "Engagement ID" : "Engagement name", "Match one existing engagement with team details. For an archived engagement, keep its exported Engagement ID and Revision."); continue; }
+      if (engagementId && data.clients.find(client => client.id === mission.clientId)?.code !== clientCode) { rowIssue(row, "Client code", "The client code does not match this Engagement ID. Keep this row linked to its engagement's client."); continue; }
+      if (engagementId && !validRevision(row, engagementId)) continue;
+      if (!engagementId && value("Revision")) { rowIssue(row, "Engagement ID", "Keep the Engagement ID with its exported revision, or leave both blank for a new engagement."); continue; }
       const roleKey = key(mission.id, roleName.toLocaleLowerCase()), prior = roleRows.get(roleKey);
       if (prior) { rowIssue(row, "Role name", `This role is already listed on row ${prior.row}. Keep one row per role within this engagement.`); continue; }
       roleRows.set(roleKey, row);
-      const matchingRoles = mission.engagement.roles.filter(role => role.name.toLocaleLowerCase() === roleName.toLocaleLowerCase());
+      const matchingRoles = mission.engagement.roles.filter(role => roleId ? role.id === roleId : role.name.toLocaleLowerCase() === roleName.toLocaleLowerCase());
+      if (roleId && matchingRoles.length !== 1) { rowIssue(row, "Role ID", "This Role ID does not belong to the selected engagement. Keep exported IDs unchanged; leave Role ID blank for a new role."); continue; }
       if (matchingRoles.length > 1) { rowIssue(row, "Role name", "More than one existing role has this name in the engagement. Give those roles distinct names in Administration before importing."); continue; }
       const existing = matchingRoles[0];
+      if (existing) {
+        const first = seenRoleIds.get(existing.id);
+        if (first !== undefined) { rowIssue(row, "Role ID", `This role is already listed on row ${first}. Keep one row per role.`); continue; }
+        seenRoleIds.set(existing.id, row.row);
+      }
       const read = (header: string, fallback: string) => row.columns.has(header) ? value(header) : fallback;
       const skills = listCell(row, "Skills", read("Skills", formatNamedList(existing?.skills ?? [])));
-      if (!skills) continue;
-      const role: EngagementRole = { ...existing, id: existing?.id ?? crypto.randomUUID(), name: roleName, headcount: Number(value("Headcount")), allocationPercent: Number(value("Allocation %").replace(/%$/, "")), skills, responsibilities: read("Responsibilities", existing?.responsibilities ?? ""), start: read("Start date", existing?.start ?? mission.engagement.start) || mission.engagement.start, end: read("End date", existing?.end ?? mission.engagement.end) || mission.engagement.end };
+      const selected = row.columns.has("Selected people IDs") ? listCell(row, "Selected people IDs", value("Selected people IDs")) : existing?.selectedResourceIds;
+      if (!skills || selected === null) continue;
+      const selection = selected && (selected.length || existing?.selectedResourceIds) ? { selectedResourceIds: selected } : {};
+      const role: EngagementRole = { ...existing, id: existing?.id ?? crypto.randomUUID(), name: roleName, headcount: Number(value("Headcount")), allocationPercent: Number(value("Allocation %").replace(/%$/, "")), skills, responsibilities: read("Responsibilities", existing?.responsibilities ?? ""), start: read("Start date", existing?.start ?? mission.engagement.start) || mission.engagement.start, end: read("End date", existing?.end ?? mission.engagement.end) || mission.engagement.end, ...selection };
       if (existing && equal(existing, role)) { changes.push({ sheet: row.sheet, row: row.row, action: "skip", label: `${roleName} · ${missionName}` }); continue; }
-      const fields = existing ? (["name", "headcount", "allocationPercent", "skills", "responsibilities", "start", "end"] as const).filter(field => !equal(existing[field], role[field])).map(field => ({ field: ({ name: "Role name", headcount: "Headcount", allocationPercent: "Allocation %", skills: "Skills", responsibilities: "Responsibilities", start: "Start date", end: "End date" })[field], before: Array.isArray(existing[field]) ? formatNamedList(existing[field]) : String(existing[field]), after: Array.isArray(role[field]) ? formatNamedList(role[field]) : String(role[field]) })) : undefined;
+      const fields = existing ? (["name", "headcount", "allocationPercent", "skills", "responsibilities", "start", "end", "selectedResourceIds"] as const).filter(field => !equal(existing[field], role[field])).map(field => {
+        const before = existing[field], after = role[field];
+        return { field: ({ name: "Role name", headcount: "Headcount", allocationPercent: "Allocation %", skills: "Skills", responsibilities: "Responsibilities", start: "Start date", end: "End date", selectedResourceIds: "Selected people IDs" })[field], before: Array.isArray(before) ? formatNamedList(before) : String(before ?? ""), after: Array.isArray(after) ? formatNamedList(after) : String(after ?? "") };
+      }) : undefined;
       mission.engagement.roles = existing ? mission.engagement.roles.map(item => item.id === existing.id ? role : item) : [...mission.engagement.roles, role];
       mission.revision++;
       touchedEngagements.add(mission.id);
@@ -248,13 +301,16 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
       const clientCode = value("Client code"), missionName = value(name === "Engagements" ? "Engagement name" : "Mission name"), missionKey = key(missionName, clientCode);
       const found = identify(row, missionKey, missions, "Mission name"); if (!found.valid) continue;
       const client = clients.get(clientCode)?.[0];
-      if (!client?.active) { rowIssue(row, "Client code", "Choose an active client code already in the workspace or included on the Clients sheet."); continue; }
+      if (!client || activeValue(row, found.existing) && !client.active) { rowIssue(row, "Client code", "Choose an active client code already in the workspace or included on the Clients sheet."); continue; }
       const fields = { name: missionName, clientId: client.id };
       if (!validate(row, { type: "save_mission", ...fields }, { name: "Mission name", clientId: "Client code" })) continue;
       if (name === "Engagements") {
         const current = found.existing?.engagement;
         const read = (header: string, fallback: string) => row.columns.has(header) ? value(header) : fallback;
         const engagement: EngagementPlan = { ...current, version: 1, sowReference: read("SOW reference", current?.sowReference ?? ""), status: (read("Status", current?.status ?? "draft") || "draft") as EngagementPlan["status"], signedOn: read("Signed on", current?.signedOn ?? "") || null, start: value("Start date"), end: value("End date"), outcomes: read("Outcomes", current?.outcomes ?? ""), roles: current?.roles ?? [] };
+        const source = read("Source", current?.source ?? "").toLocaleLowerCase("en-US");
+        if (source && source !== "direct" && source !== "sow") { rowIssue(row, "Source", "Choose direct or sow, or leave blank for the original SOW interpretation."); continue; }
+        if (source === "direct" || source === "sow") engagement.source = source; else delete engagement.source;
         merge<AdminMission>(row, found.existing, { ...fields, engagement }, data.missions, missions, missionKey, `${missionName} · ${clientCode}`);
         const saved = missions.get(missionKey)?.[0]; if (saved) { engagementRows.set(saved.id, row); touchedEngagements.add(saved.id); }
       } else merge<AdminMission>(row, found.existing, fields, data.missions, missions, missionKey, `${missionName} · ${clientCode}`);
@@ -268,7 +324,7 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
       const role = issue.path[0] === "roles" && typeof issue.path[1] === "number" ? mission.engagement!.roles[issue.path[1]] : undefined;
       const row = role ? roleRows.get(key(mission.id, role.name.toLocaleLowerCase())) ?? engagementRows.get(mission.id) : engagementRows.get(mission.id);
       const fieldKey = String(issue.path[role ? 2 : 0] ?? "Row");
-      const field = ({ sowReference: "SOW reference", status: "Status", signedOn: "Signed on", start: "Start date", end: "End date", outcomes: "Outcomes", roles: "Engagement roles", name: "Role name", headcount: "Headcount", allocationPercent: "Allocation %", skills: "Skills", responsibilities: "Responsibilities" } as Record<string, string>)[fieldKey] ?? "Row";
+      const field = ({ sowReference: "SOW reference", status: "Status", signedOn: "Signed on", start: "Start date", end: "End date", outcomes: "Outcomes", roles: "Engagement roles", name: "Role name", headcount: "Headcount", allocationPercent: "Allocation %", skills: "Skills", responsibilities: "Responsibilities", selectedResourceIds: "Selected people IDs", source: "Source" } as Record<string, string>)[fieldKey] ?? "Row";
       errors.push({ sheet: row?.sheet ?? "Engagement roles", row: row?.row ?? 0, field, message: issue.message });
     }
   }
@@ -282,7 +338,7 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
   return { draft, counts, sheets, errors, changes };
 }
 
-function describeEngagement(plan: EngagementPlan) { return `${plan.status} · ${plan.sowReference || "No SOW reference"} · ${plan.start} to ${plan.end}${plan.signedOn ? ` · signed ${plan.signedOn}` : ""}${plan.outcomes ? ` · ${plan.outcomes}` : ""}`; }
+function describeEngagement(plan: EngagementPlan) { return `${plan.source === "direct" ? "Direct team plan" : "SOW plan"} · ${plan.status} · ${plan.sowReference || "No SOW reference"} · ${plan.start} to ${plan.end}${plan.signedOn ? ` · signed ${plan.signedOn}` : ""}${plan.outcomes ? ` · ${plan.outcomes}` : ""}`; }
 function describeProfile(profile?: ResourceProfile) { return `${profile?.affiliation === "impower" ? "Impower" : profile?.affiliation === "contractor" ? "Contractor" : "Not designated"} · ${formatNamedList(profile?.roles ?? []) || "No delivery roles"} · ${formatNamedList(profile?.skills ?? []) || "No skills"}`; }
 
 export function planSpreadsheetImport(input: LocalAdminStore, raw: SpreadsheetWorkbook): SpreadsheetImportPlan {
@@ -377,6 +433,9 @@ export async function readSpreadsheetFile(file: File): Promise<SpreadsheetWorkbo
   const result: SpreadsheetWorkbook = { sheets: [], errors: [] };
   for (const sheet of excel.worksheets) {
     if (sheet.name === "Start here") continue;
+    // Retain presence for the preview's reference-only notice without allowing
+    // reference contents to enter editable rows or permission/policy commands.
+    if (isReferenceSheet(sheet.name)) { result.sheets.push({ name: sheet.name, rows: [] }); continue; }
     const rows: SpreadsheetCell[][] = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (isDataSheet(sheet.name) && rowNumber < 4) return;
@@ -387,7 +446,7 @@ export async function readSpreadsheetFile(file: File): Promise<SpreadsheetWorkbo
         }
         let value: SpreadsheetCell;
         if (cell.value instanceof Date && Number.isFinite(cell.value.getTime()) && ["Start date", "End date", "Signed on"].some(header => String(sheet.getCell(4, column).value).trim().toLowerCase() === header.toLowerCase())) value = cell.value.toISOString().slice(0, 10);
-        else if (typeof cell.value === "number" && String(sheet.getCell(4, column).value).trim().toLowerCase() === "allocation %" && cell.numFmt.replace(/"[^"]*"|\\./g, "").includes("%")) value = cell.value * 100;
+        else if (typeof cell.value === "number" && String(sheet.getCell(4, column).value).trim().toLowerCase() === "allocation %" && (cell.numFmt ?? "").replace(/"[^"]*"|\\./g, "").includes("%")) value = cell.value * 100;
         else if (typeof cell.value === "string" || typeof cell.value === "number" || typeof cell.value === "boolean") value = cell.value;
         else if (typeof cell.value === "object" && ("formula" in cell.value || "sharedFormula" in cell.value)) value = { formula: String(cell.formula || "formula") };
         else if (typeof cell.value === "object" && "hyperlink" in cell.value && typeof cell.value.text === "string") value = cell.value.text;

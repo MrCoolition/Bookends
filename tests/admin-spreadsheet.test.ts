@@ -4,12 +4,86 @@ import { readFile } from "node:fs/promises";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { applyLocalAdminCommand, createLocalAdminStore, LOCAL_ADMIN_OWNER_ID } from "../lib/admin/local";
 import { findRoleMatches } from "../lib/admin/engagement";
-import { applySpreadsheetImport, planSpreadsheetImport, readSpreadsheetFile, SPREADSHEET_HEADERS, type SpreadsheetWorkbook, type SpreadsheetSheetName, type SpreadsheetCell } from "../lib/admin/spreadsheet";
+import { applySpreadsheetImport, planSpreadsheetImport, readSpreadsheetFile, SPREADSHEET_HEADERS, SPREADSHEET_REFERENCE_SHEETS, type SpreadsheetWorkbook, type SpreadsheetSheetName, type SpreadsheetCell } from "../lib/admin/spreadsheet";
 
 function sheet(name: SpreadsheetSheetName, records: SpreadsheetCell[][], headers: string[] = [...SPREADSHEET_HEADERS[name]]) { return { name, rows: [[name],["Instructions"],[],headers,...records] }; }
 function example(): SpreadsheetWorkbook { return { sheets: [sheet("Missions",[["Analytics launch","northstar"]]),sheet("People",[["Alex Morgan","Data",""]]),sheet("Clients",[["northstar","Northstar","Jamie","jamie@example.test","Welcome notes"]]),sheet("HOMEs",[["Data","Data practice","Analysis and engineering"]])] }; }
 function imported() { const store=createLocalAdminStore(); return applySpreadsheetImport(store,planSpreadsheetImport(store,example())); }
 function code(expected: string) { return (error:unknown)=>!!error&&typeof error==="object"&&"code" in error&&error.code===expected; }
+function recordSheet(name: SpreadsheetSheetName, records: Record<string, SpreadsheetCell>[]) {
+  return sheet(name, records.map(record => SPREADSHEET_HEADERS[name].map(header => record[header] ?? "")));
+}
+
+test("exported IDs rename people and catalogs without duplicating records or breaking former role names", () => {
+  let store = imported();
+  store = applyLocalAdminCommand(store, { type: "save_capability", kind: "role", name: "Data engineer", description: "Pipelines" });
+  const person = store.data.resources[0], role = store.data.capabilities![0];
+  const workbook: SpreadsheetWorkbook = { sheets: [
+    recordSheet("People", [{ "Person name": "Alex Updated", "HOME code": "Data", "Record ID": person.id, Revision: person.revision, Active: true }]),
+    recordSheet("Roles", [{ Name: "Data engineering specialist", Description: role.description, "Record ID": role.id, Revision: role.revision, Active: "TRUE" }]),
+  ] };
+  const plan = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(plan.errors, []); assert.deepEqual(plan.counts, { adds: 0, updates: 2, skips: 0 });
+  const next = applySpreadsheetImport(store, plan);
+  assert.equal(next.data.resources.length, 1); assert.equal(next.data.resources[0].id, person.id); assert.equal(next.data.resources[0].name, "Alex Updated");
+  assert.equal(next.data.resources[0].profile, undefined);
+  assert.equal(next.data.capabilities!.length, 1); assert.equal(next.data.capabilities![0].id, role.id); assert.deepEqual(next.data.capabilities![0].aliases, ["Data engineer"]);
+  assert.deepEqual(next.data.missions, store.data.missions); assert.deepEqual(next.data.members, store.data.members); assert.deepEqual(next.data.templates, store.data.templates);
+});
+
+test("unchanged exported archived records roundtrip and explicit Active edits reactivate the same records", () => {
+  let store = imported();
+  const person = store.data.resources[0], home = store.data.homes[0], client = store.data.clients[0], mission = store.data.missions[0];
+  store = applyLocalAdminCommand(store, { type: "set_resource_active", id: person.id, expectedRevision: 1, active: false });
+  store = applyLocalAdminCommand(store, { type: "set_home_active", id: home.id, expectedRevision: 1, active: false });
+  store = applyLocalAdminCommand(store, { type: "set_mission_active", id: mission.id, expectedRevision: 1, active: false });
+  store = applyLocalAdminCommand(store, { type: "set_client_active", id: client.id, expectedRevision: 1, active: false });
+  const workbook: SpreadsheetWorkbook = { sheets: [
+    recordSheet("HOMEs", [{ "HOME code": home.code, "HOME name": home.name, Description: home.description, "Record ID": home.id, Revision: 2, Active: false }]),
+    recordSheet("Clients", [{ "Client code": client.code, "Client name": client.name, "Contact name": client.contactName, "Contact email": client.contactEmail, Notes: client.notes, "Record ID": client.id, Revision: 2, Active: false }]),
+    recordSheet("People", [{ "Person name": person.name, "HOME code": home.code, "Record ID": person.id, Revision: 2, Active: false }]),
+    recordSheet("Missions", [{ "Mission name": mission.name, "Client code": client.code, "Record ID": mission.id, Revision: 2, Active: false }]),
+  ] };
+  const unchanged = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(unchanged.errors, []); assert.deepEqual(unchanged.counts, { adds: 0, updates: 0, skips: 4 });
+  assert.deepEqual(applySpreadsheetImport(store, unchanged), store);
+  for (const tab of workbook.sheets) tab.rows[4][(SPREADSHEET_HEADERS[tab.name as SpreadsheetSheetName] as readonly string[]).indexOf("Active")] = "true";
+  const reactivate = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(reactivate.errors, []); assert.deepEqual(reactivate.counts, { adds: 0, updates: 4, skips: 0 });
+  const next = applySpreadsheetImport(store, reactivate);
+  for (const record of [...next.data.homes, ...next.data.clients, ...next.data.resources, ...next.data.missions]) { assert.equal(record.active, true); assert.equal(record.revision, 3); }
+});
+
+test("export revisions reject edits made since download and IDs cannot change record type or immutable codes", () => {
+  const store = imported(), person = store.data.resources[0], client = store.data.clients[0];
+  const input = () => recordSheet("People", [{ "Person name": "Updated", "Record ID": person.id, Revision: person.revision, Active: true }]);
+  const newer = applyLocalAdminCommand(store, { type: "save_resource", id: person.id, expectedRevision: person.revision, name: "Changed elsewhere", home: person.home, ownerId: person.ownerId });
+  assert.ok(planSpreadsheetImport(newer, { sheets: [input()] }).errors.some(issue => issue.field === "Revision"));
+  for (const badId of [crypto.randomUUID(), client.id]) {
+    const tab = input(); tab.rows[4][6] = badId;
+    assert.ok(planSpreadsheetImport(store, { sheets: [tab] }).errors.some(issue => issue.field === "Record ID"));
+  }
+  const missingRevision = input(); missingRevision.rows[4][7] = "";
+  assert.ok(planSpreadsheetImport(store, { sheets: [missingRevision] }).errors.some(issue => issue.field === "Revision"));
+  const duplicates = input(); duplicates.rows.push([...duplicates.rows[4]]); duplicates.rows[5][0] = "Second name";
+  assert.ok(planSpreadsheetImport(store, { sheets: [duplicates] }).errors.some(issue => issue.message.includes("already listed")));
+  const changedCode = recordSheet("Clients", [{ "Client code": "changed", "Client name": client.name, "Record ID": client.id, Revision: client.revision, Active: true }]);
+  assert.ok(planSpreadsheetImport(store, { sheets: [changedCode] }).errors.some(issue => issue.field === "Client code" && issue.message.includes("permanent")));
+});
+
+test("same-name people and owners roundtrip by identity and omitted rows never delete data", () => {
+  let store = imported();
+  store = applyLocalAdminCommand(store, { type: "create_local_member", name: "Same Owner", role: "mission_owner", homeScope: null, resourceId: null, grants: [] });
+  const owner = store.data.members.at(-1)!;
+  store = applyLocalAdminCommand(store, { type: "create_local_member", name: "Same Owner", role: "mission_owner", homeScope: null, resourceId: null, grants: [] });
+  const original = store.data.resources[0];
+  store = applyLocalAdminCommand(store, { type: "save_resource", id: original.id, expectedRevision: original.revision, name: original.name, home: "", ownerId: owner.id });
+  store = applyLocalAdminCommand(store, { type: "save_resource", name: original.name, home: "", ownerId: "" });
+  const person = store.data.resources[0];
+  const workbook = { sheets: [recordSheet("People", [{ "Person name": person.name, "Owner name": owner.name, "Record ID": person.id, Revision: person.revision, Active: true }])] };
+  const plan = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(plan.errors, []); assert.deepEqual(plan.counts, { adds: 0, updates: 0, skips: 1 }); assert.deepEqual(applySpreadsheetImport(store, plan), store);
+});
 
 test("spreadsheet preview resolves parents in any sheet order and commits a whole batch once", () => {
   const store=createLocalAdminStore(), before=structuredClone(store), plan=planSpreadsheetImport(store,example());
@@ -180,9 +254,28 @@ async function templateFile() { return new File([new Uint8Array(await readFile(t
 test("actual blank Excel template parses quickly without importing its 1000 formatted empty rows", async () => {
   const workbook=await readSpreadsheetFile(await templateFile());
   assert.deepEqual(workbook.sheets.map(sheet=>sheet.name),["HOMEs","Clients","People","Missions","Engagements","Engagement roles","Roles","Skills"]);
-  assert.deepEqual(workbook.sheets.find(sheet => sheet.name === "People")!.rows[3], [...SPREADSHEET_HEADERS.People]);
+  assert.deepEqual(workbook.sheets.find(sheet => sheet.name === "People")!.rows[3], [...SPREADSHEET_HEADERS.People].slice(0, 6));
   const plan=planSpreadsheetImport(createLocalAdminStore(),workbook);
   assert.deepEqual(plan.errors,[]);assert.deepEqual(plan.counts,{adds:0,updates:0,skips:0});
+});
+
+test("actual Excel reading retains reference sheet presence while discarding all reference content", async () => {
+  const { default: ExcelJS } = await import("exceljs");
+  const excel = new ExcelJS.Workbook();
+  excel.addWorksheet("People").getRow(4).values = ["Person name"];
+  for (const name of SPREADSHEET_REFERENCE_SHEETS) {
+    const reference = excel.addWorksheet(name);
+    reference.getCell("A1").value = "Reference only";
+    reference.getCell("A5").value = { formula: "1+1", result: 2 };
+    reference.getCell("B5").value = "An edited reference value must never be imported";
+  }
+  const bytes = await excel.xlsx.writeBuffer();
+  const workbook = await readSpreadsheetFile(new File([new Uint8Array(bytes)], "workspace.xlsx"));
+  assert.equal(workbook.sheets.some(sheet => sheet.name === "Workspace"), true);
+  assert.deepEqual(workbook.sheets.filter(sheet => sheet.name !== "People"), SPREADSHEET_REFERENCE_SHEETS.map(name => ({ name, rows: [] })));
+  assert.deepEqual(workbook.errors, []);
+  const store = createLocalAdminStore(), plan = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(plan.errors, []); assert.deepEqual(applySpreadsheetImport(store, plan), store);
 });
 
 function engagementWorkbook(): SpreadsheetWorkbook {
@@ -192,6 +285,60 @@ function engagementWorkbook(): SpreadsheetWorkbook {
     ["Application build", "ACORN", "BA / PM", 1, "50%", "Agile; Requirements; Testing", "Run boards and agile ceremonies; maintain requirements; light testing", "2027-02-01", "2027-06-30"],
   ]), sheet("Engagements", [["Application build", "ACORN", "SOW-2027-001", "signed", "2026-12-18", "2027-01-01", "2027-06-30", "Launch a customer application"]]), sheet("Clients", [["ACORN", "Acorn Studio", "", "", ""]])] };
 }
+test("engagement exports preserve intake and selections, rename IDs, and validate all rows against the original revision", () => {
+  const empty = createLocalAdminStore();
+  let store = applySpreadsheetImport(empty, planSpreadsheetImport(empty, engagementWorkbook()));
+  store = applyLocalAdminCommand(store, { type: "save_resource", name: "First teammate", home: "", ownerId: "" });
+  store = applyLocalAdminCommand(store, { type: "save_resource", name: "Second teammate", home: "", ownerId: "" });
+  const first = store.data.resources[0], second = store.data.resources[1], original = store.data.missions[0];
+  store = applyLocalAdminCommand(store, { type: "save_mission", id: original.id, expectedRevision: original.revision, name: original.name, clientId: original.clientId, engagement: {
+    ...original.engagement!, source: "direct", status: "draft", sowReference: "", signedOn: null,
+    intake: { sourceName: "Existing notes", sourceKind: "text", evidence: [{ field: "outcomes", quote: "Launch a customer application", verified: true }], uncertainties: ["Confirm testing needs"] },
+    roles: original.engagement!.roles.map((role, index) => index === 0 ? { ...role, selectedResourceIds: [first.id] } : role),
+  } });
+  const mission = store.data.missions[0], plan = mission.engagement!;
+  const book: SpreadsheetWorkbook = { sheets: [recordSheet("Engagements", [{
+    "Engagement name": mission.name, "Client code": "ACORN", "SOW reference": plan.sowReference, Status: plan.status,
+    "Signed on": plan.signedOn, "Start date": plan.start, "End date": plan.end, Outcomes: plan.outcomes, Source: plan.source!,
+    "Record ID": mission.id, Revision: mission.revision, Active: mission.active,
+  }]), recordSheet("Engagement roles", plan.roles.map(role => ({
+    "Engagement name": mission.name, "Client code": "ACORN", "Role name": role.name, Headcount: role.headcount, "Allocation %": role.allocationPercent,
+    Skills: role.skills.join("; "), Responsibilities: role.responsibilities, "Start date": role.start, "End date": role.end,
+    "Role ID": role.id, "Engagement ID": mission.id, Revision: mission.revision, "Selected people IDs": role.selectedResourceIds?.join("; ") ?? "",
+  })))] };
+  const untouched = planSpreadsheetImport(store, book);
+  assert.deepEqual(untouched.errors, []); assert.deepEqual(untouched.counts, { adds: 0, updates: 0, skips: 4 });
+  assert.deepEqual(applySpreadsheetImport(store, untouched), store);
+  book.sheets[0].rows[4][0] = "Renamed application";
+  // Child display labels may still use the exported parent name; their IDs keep
+  // the association while both parent and child names change in the same batch.
+  book.sheets[1].rows[4][2] = "Data engineering specialist";
+  book.sheets[1].rows[4][12] = `${first.id}; ${second.id}`;
+  book.sheets[1].rows[5][4] = 75;
+  const edited = planSpreadsheetImport(store, book);
+  assert.deepEqual(edited.errors, []); assert.deepEqual(edited.counts, { adds: 0, updates: 3, skips: 1 });
+  const next = applySpreadsheetImport(store, edited), saved = next.data.missions[0];
+  assert.equal(next.data.missions.length, 1); assert.equal(saved.id, mission.id); assert.equal(saved.name, "Renamed application");
+  assert.equal(saved.engagement!.roles[0].id, plan.roles[0].id); assert.equal(saved.engagement!.roles[0].name, "Data engineering specialist");
+  assert.deepEqual(saved.engagement!.roles[0].selectedResourceIds, [first.id, second.id]); assert.deepEqual(saved.engagement!.intake, plan.intake);
+  assert.equal(saved.engagement!.source, "direct"); assert.deepEqual(saved.engagement!.roles[2], plan.roles[2]);
+  assert.ok(planSpreadsheetImport(next, book).errors.some(issue => issue.field === "Revision"));
+  const badRole = structuredClone(book); badRole.sheets[1].rows[4][9] = crypto.randomUUID();
+  assert.ok(planSpreadsheetImport(store, badRole).errors.some(issue => issue.field === "Role ID"));
+  const wrongSelection = structuredClone(book); wrongSelection.sheets[1].rows[4][12] = crypto.randomUUID();
+  assert.ok(planSpreadsheetImport(store, wrongSelection).errors.some(issue => issue.message.includes("teammate") || issue.message.includes("reference")));
+  const duplicateRole = structuredClone(book); duplicateRole.sheets[1].rows.push([...duplicateRole.sheets[1].rows[4]]); duplicateRole.sheets[1].rows.at(-1)![2] = "Duplicate by ID";
+  assert.ok(planSpreadsheetImport(store, duplicateRole).errors.some(issue => issue.field === "Role ID" && issue.message.includes("already listed")));
+});
+
+test("reference-only sheets never grant access, change playbooks, or replace editable data", () => {
+  const store = imported(), before = structuredClone(store);
+  const workbook: SpreadsheetWorkbook = { sheets: [sheet("People", [], ["Person name"]), ...["Workspace", "Members", "Playbooks", "Requirements", "SOW notes", "Team selections"].map(name => ({ name, rows: [["Not editable"], ["Injected membership or policy update"]] }))] };
+  const plan = planSpreadsheetImport(store, workbook);
+  assert.deepEqual(plan.errors, []); assert.deepEqual(plan.counts, { adds: 0, updates: 0, skips: 0 }); assert.deepEqual(applySpreadsheetImport(store, plan), before);
+  workbook.sheets.push({ name: "Unknown access", rows: [["Not a reference sheet"]] });
+  assert.ok(planSpreadsheetImport(store, workbook).errors.some(issue => issue.field === "Sheet name"));
+});
 test("SOW import links a months-long engagement and role demand regardless of sheet order", () => {
   const store = createLocalAdminStore(), before = structuredClone(store), plan = planSpreadsheetImport(store, engagementWorkbook());
   assert.deepEqual(plan.errors, []); assert.deepEqual(plan.counts, { adds: 5, updates: 0, skips: 0 });

@@ -131,6 +131,11 @@ export function SharedWorkspace({ view = "admin" }: { view?: "admin" | "studio" 
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setNotice("Exported a backup of the shared revision currently open.");
   };
+  const exportSpreadsheet = async () => {
+    await loadStore();
+    if (!storeRef.current) throw new Error("Open the shared workspace before exporting Excel.");
+    return structuredClone(storeRef.current);
+  };
   const chooseBackup = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; event.target.value = ""; if (!file || !storeRef.current) return;
     const expectedRevision = storeRef.current.revision; setBackupError("");
@@ -153,9 +158,12 @@ export function SharedWorkspace({ view = "admin" }: { view?: "admin" | "studio" 
     finally { writeBusy.current = false; setBusy(false); }
   };
   const previewSpreadsheet = async (file: File) => {
-    const attempt = ++spreadsheetAttempt.current, current = storeRef.current;
-    if (!current) throw new Error("Open the shared workspace before importing Excel.");
+    const attempt = ++spreadsheetAttempt.current;
     spreadsheetReview.current = null;
+    await loadStore();
+    if (attempt !== spreadsheetAttempt.current) throw new Error("This review was closed. Choose a workbook to begin again.");
+    const current = storeRef.current;
+    if (!current) throw new Error("Open the shared workspace before importing Excel.");
     const { readSpreadsheetFile, planSpreadsheetImport } = await import("@/lib/admin/spreadsheet");
     const workbook = await readSpreadsheetFile(file), plan = planSpreadsheetImport(current, workbook);
     if (attempt !== spreadsheetAttempt.current) throw new Error("This review was closed. Choose a workbook to begin again.");
@@ -181,8 +189,8 @@ export function SharedWorkspace({ view = "admin" }: { view?: "admin" | "studio" 
   const controls = <section className="shared-controls" aria-label="Shared workspace controls">
     <div className="shared-toolbar">
       <div className="shared-toolbar-status" title={`Shared workspace · revision ${store?.revision}`}><Cloud size={17}/><span>Shared<span className="shared-status-detail"> workspace</span></span>{busy && <small role="status">Saving…</small>}</div>
-      <div className="shared-toolbar-actions"><AdminSpreadsheetImport compact storageMode="shared" disabled={!store || busy || locked} onPreview={previewSpreadsheet} onApply={applySpreadsheet} onDiscard={() => { spreadsheetAttempt.current++; spreadsheetReview.current = null; }} />
-        <details ref={optionsRef} className="shared-options"><summary aria-label="Workspace options" title="Workspace options"><MoreHorizontal size={20}/></summary><div className="shared-options-panel"><p>Shared workspace <span>Revision {store?.revision}</span></p><button onClick={() => { closeOptions(); exportBackup(); }} disabled={!store || busy}><Download size={16}/> Export setup</button><button onClick={() => { closeOptions(); fileRef.current?.click(); }} disabled={busy}><Upload size={16}/> Restore backup</button><button onClick={() => { closeOptions(); void refreshVisible(); }} disabled={busy}><RefreshCw size={16}/> Refresh shared records</button>{hasBrowserSetup && <button onClick={() => { closeOptions(); reviewBrowserSetup(); }} disabled={busy}><ArrowRight size={16}/> Review earlier browser setup</button>}<button className="shared-options-lock" onClick={() => { closeOptions(); void signOut(); }} disabled={busy}><LogOut size={16}/> Lock workspace</button></div></details>
+      <div className="shared-toolbar-actions"><AdminSpreadsheetImport compact storageMode="shared" disabled={!store || busy || locked} onExport={exportSpreadsheet} onPreview={previewSpreadsheet} onApply={applySpreadsheet} onDiscard={() => { spreadsheetAttempt.current++; spreadsheetReview.current = null; }} />
+        <details ref={optionsRef} className="shared-options"><summary aria-label="Workspace options" title="Workspace options"><MoreHorizontal size={20}/></summary><div className="shared-options-panel"><p>Shared workspace <span>Revision {store?.revision}</span></p><button onClick={() => { closeOptions(); exportBackup(); }} disabled={!store || busy}><Download size={16}/> Download JSON backup</button><button onClick={() => { closeOptions(); fileRef.current?.click(); }} disabled={busy}><Upload size={16}/> Restore backup</button><button onClick={() => { closeOptions(); void refreshVisible(); }} disabled={busy}><RefreshCw size={16}/> Refresh shared records</button>{hasBrowserSetup && <button onClick={() => { closeOptions(); reviewBrowserSetup(); }} disabled={busy}><ArrowRight size={16}/> Review earlier browser setup</button>}<button className="shared-options-lock" onClick={() => { closeOptions(); void signOut(); }} disabled={busy}><LogOut size={16}/> Lock workspace</button></div></details>
       </div>
     </div>
     <input ref={fileRef} className="admin-local-file" type="file" accept="application/json,.json" aria-label="Choose a BOOKENDS backup" onChange={event => void chooseBackup(event)} />
