@@ -145,7 +145,7 @@ export async function exportWorkspaceSpreadsheet(store: LocalAdminStore): Promis
     const headers = item.rows[3].map(value => String(value ?? ""));
     const widths = headers.map(header => guide && header === "What to do" ? 110 : columnWidth(header));
     sheet.columns = widths.map(width => ({ width }));
-    item.rows.forEach(row => sheet.addRow(row));
+    item.rows.forEach(row => sheet.addRow(row.map(value => value === "" ? null : value)));
     sheet.mergeCells(1, 1, 1, headers.length);
     sheet.mergeCells(2, 1, 2, headers.length);
     sheet.mergeCells(3, 1, 3, headers.length);
@@ -162,7 +162,7 @@ export async function exportWorkspaceSpreadsheet(store: LocalAdminStore): Promis
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: rowIndex === 1 ? "FF18243C" : rowIndex === 4 ? editable ? "FF3455F6" : "FF52617B" : rowIndex > 4 && rowIndex % 2 ? "FFF0F3FA" : "FFFFFFFF" } };
         // Explicit strings stay strings, even when user content starts with =, +, - or @.
         if (typeof cell.value === "string") cell.numFmt = "@";
-        else if (typeof cell.value === "number") cell.numFmt = "0.##";
+        else if (typeof cell.value === "number") cell.numFmt = Number.isInteger(cell.value) ? "0" : "0.########";
         if (rowIndex > 4 && /^(Record ID|Role ID|Engagement ID|Revision)$/.test(headers[column - 1])) cell.font = { name: "Aptos", size: 10, color: { argb: "FF6D7890" } };
       });
     }
