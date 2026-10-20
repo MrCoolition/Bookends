@@ -451,7 +451,7 @@ test("a Studio teammate needs no practice or owner to be matched and selected", 
   expect(state.store.data.resources[0]).toMatchObject({ name: "Independent engineer", home: "", ownerId: "", profile: { roles: ["Data engineer"], skills: [] } });
   expect(state.store.data.homes).toEqual([]);
   expect(state.store.data.members).toEqual(originalMembers);
-  await page.getByRole("button", { name: /Role & skill matches/ }).click();
+  await expect(page.getByRole("button", { name: /Role matches/ })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Select Independent engineer for Data engineer", exact: true }).click();
   await expect(page.locator(".ts-position-filled")).toContainText("Independent engineer");
   expect(state.writes).toEqual(["POST"]);

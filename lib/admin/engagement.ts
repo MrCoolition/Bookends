@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AdminCapability, AdminResource } from "./contracts";
+import { createCapabilityResolver } from "./capability-resolution";
 
 const text = (maximum: number, required = true) => z.string().trim().min(required ? 1 : 0).max(maximum).refine(value => !value.includes("\u0000"), "Text cannot contain null characters.");
 const DAY = 86_400_000;
@@ -45,6 +46,8 @@ export function engagementWindowError(start: string, end: string): string {
 
 export const engagementRoleSchema = z.object({
   id: z.uuid(), name: text(160), headcount: z.int().min(1).max(1000),
+  /** Original SOW wording remains available after choosing the workspace role. */
+  sourceName: text(160).optional(),
   allocationPercent: z.number().finite().min(1).max(100),
   skills: z.array(text(100)).max(40).refine(values => new Set(values.map(value => value.toLocaleLowerCase("en-US"))).size === values.length, "List each skill once for this role."),
   responsibilities: text(3000, false), start: date, end: date,
@@ -96,21 +99,18 @@ export type EngagementPlan = z.infer<typeof engagementPlanSchema>;
 
 /** Evidence of role/skill alignment only; this makes no claim about availability. */
 export function findRoleMatches(role: EngagementRole, resources: AdminResource[], capabilities: AdminCapability[] = []) {
-  const catalog = new Map<string, string>();
-  // Archived names still resolve so retiring or renaming a catalog item does not
-  // rewrite the meaning of earlier signed SOWs or recorded teammate profiles.
-  for (const capability of capabilities) for (const name of [capability.name, ...(capability.aliases ?? [])]) catalog.set(`${capability.kind}:${normalized(name)}`, capability.id);
-  const canonical = (kind: "role" | "skill", value: string) => catalog.get(`${kind}:${normalized(value)}`) ?? `${kind}:${normalized(value)}`;
+  const resolver = createCapabilityResolver(capabilities);
+  const roleKey = resolver.key("role", role.name);
   return resources.filter(resource => resource.active && resource.profile).map(resource => {
     const profile = resource.profile!;
-    const skills = new Set(profile.skills.map(skill => canonical("skill", skill)));
+    const skills = new Set(profile.skills.map(skill => resolver.key("skill", skill)).filter(key => key !== null));
     return {
-      resource, roleMatch: profile.roles.some(name => canonical("role", name) === canonical("role", role.name)),
-      matchedSkills: role.skills.filter(skill => skills.has(canonical("skill", skill))),
-      missingSkills: role.skills.filter(skill => !skills.has(canonical("skill", skill))), skillsKnown: profile.skills.length > 0,
+      resource, roleMatch: roleKey !== null && profile.roles.some(name => resolver.key("role", name) === roleKey),
+      matchedSkills: role.skills.filter(skill => { const key = resolver.key("skill", skill); return key !== null && skills.has(key); }),
+      missingSkills: role.skills.filter(skill => { const key = resolver.key("skill", skill); return key === null || !skills.has(key); }), skillsKnown: profile.skills.length > 0,
     };
   }).filter(match => match.roleMatch || match.matchedSkills.length > 0)
-    .sort((a, b) => a.missingSkills.length - b.missingSkills.length || Number(b.roleMatch) - Number(a.roleMatch) || a.resource.name.localeCompare(b.resource.name, "en-US") || a.resource.id.localeCompare(b.resource.id));
+    .sort((a, b) => Number(b.roleMatch) - Number(a.roleMatch) || a.missingSkills.length - b.missingSkills.length || a.resource.name.localeCompare(b.resource.name, "en-US") || a.resource.id.localeCompare(b.resource.id));
 }
 
 /** Inclusive duration in calendar months, rounded to one decimal. Full month

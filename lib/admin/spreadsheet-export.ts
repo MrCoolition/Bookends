@@ -57,6 +57,7 @@ export function workspaceSpreadsheetData(store: LocalAdminStore): SpreadsheetWor
     const common: SpreadsheetCell[] = [mission.name, mission.id, plan.version, plan.source ?? "", plan.sowReference, intake?.sourceName ?? "", intake?.sourceKind ?? ""];
     return [
       [...common, "Plan", "", intake ? "SOW intake saved" : "No SOW intake", ""],
+      ...plan.roles.filter(role => role.sourceName).map(role => [...common, "Original role title", role.id, role.sourceName!, ""]),
       ...(intake?.evidence ?? []).map(item => [...common, "Evidence", item.field, item.quote, stringBoolean(item.verified)]),
       ...(intake?.uncertainties ?? []).map(item => [...common, "Uncertainty", "", item, ""]),
     ];

@@ -71,14 +71,14 @@ test("local legacy backups remain valid and omitted engagement/profile fields pr
   assert.throws(() => parseLocalAdminStore(broken));
 });
 
-test("role matches use recorded business skills and roles without inventing availability or permission", () => {
+test("recorded role matches precede skill-only suggestions without inventing availability or permission", () => {
   const person = (name: string, profile?: AdminResource["profile"], active = true): AdminResource => ({ id: randomUUID(), name, home: "ENG", ownerId: LOCAL_ADMIN_OWNER_ID, active, revision: 1, profile });
   const people = [person("Partial", { roles: ["Data engineer"], skills: ["SQL"] }), person("Full", { roles: ["data ENGINEER"], skills: ["sql", "Python"] }), person("Skill-aligned", { roles: ["Analyst"], skills: ["SQL", "Python"] }), person("Role only", { roles: ["Data engineer"], skills: [] }), person("Unprofiled"), person("Other", { roles: ["Administrator"], skills: ["HR"] }), person("Archived", { roles: ["Data engineer"], skills: ["SQL", "Python"] }, false)];
   const matches = findRoleMatches(role(), people);
-  assert.deepEqual(matches.map(item => item.resource.name), ["Full", "Skill-aligned", "Partial", "Role only"]);
+  assert.deepEqual(matches.map(item => item.resource.name), ["Full", "Partial", "Role only", "Skill-aligned"]);
   assert.equal(matches[0].roleMatch, true); assert.deepEqual(matches[0].missingSkills, []);
-  assert.equal(matches[1].roleMatch, false); assert.deepEqual(matches[1].matchedSkills, ["SQL", "Python"]);
-  assert.equal(matches[3].skillsKnown, false); assert.deepEqual(matches[3].missingSkills, ["SQL", "Python"]);
+  assert.equal(matches[3].roleMatch, false); assert.deepEqual(matches[3].matchedSkills, ["SQL", "Python"]);
+  assert.equal(matches[2].skillsKnown, false); assert.deepEqual(matches[2].missingSkills, ["SQL", "Python"]);
   assert.equal(profileSchema.safeParse({ roles: ["BA", " ba "], skills: [] }).success, false);
   assert.equal(profileSchema.safeParse({ roles: [], skills: [], grants: ["administrator"] }).success, false);
 });

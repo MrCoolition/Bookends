@@ -1,5 +1,6 @@
 import type { AdminBootstrap, AdminResource } from "../admin/contracts";
 import { isEngagementDate } from "../admin/engagement";
+import { createCapabilityResolver } from "../admin/capability-resolution";
 import { emptyForecast, type ForecastCandidate, type ForecastMonth, type ForecastResult, type ForecastRoleResult, type ForecastScenario } from "./types";
 
 const DAY = 86_400_000;
@@ -26,11 +27,9 @@ export function analyzeForecast(data: AdminBootstrap, scenario: ForecastScenario
   if (horizonDate.getUTCFullYear() > 9999) throw new Error("Choose a planning horizon within the supported calendar (years 0001 through 9999).");
   const horizon = horizonDate.getTime();
   const people = data.resources.filter(person => person.active).sort((a, b) => a.name.localeCompare(b.name, "en-US") || a.id.localeCompare(b.id));
-  const aliases = new Map<string, string>();
-  const nameKey = (kind: "role" | "skill", value: string) => `${kind}:${value.trim().toLocaleLowerCase("en-US")}`;
-  for (const capability of data.capabilities ?? []) for (const name of [capability.name, ...(capability.aliases ?? [])]) aliases.set(nameKey(capability.kind, name), capability.id);
-  const canonical = (kind: "role" | "skill", value: string) => aliases.get(nameKey(kind, value)) ?? nameKey(kind, value);
-  const profiles = new Map(people.map(person => [person.id, { roles: new Set((person.profile?.roles ?? []).map(name => canonical("role", name))), skills: new Set((person.profile?.skills ?? []).map(name => canonical("skill", name))) }]));
+  const resolver = createCapabilityResolver(data.capabilities ?? []);
+  const canonical = resolver.key;
+  const profiles = new Map(people.map(person => [person.id, { roles: new Set((person.profile?.roles ?? []).map(name => canonical("role", name)).filter(key => key !== null)), skills: new Set((person.profile?.skills ?? []).map(name => canonical("skill", name)).filter(key => key !== null)) }]));
   const capacities = new Map(forecast.capacities.map(row => [row.resourceId, row]));
   const known = people.filter(person => capacities.has(person.id));
   const warningSet = new Set<string>();
@@ -54,13 +53,16 @@ export function analyzeForecast(data: AdminBootstrap, scenario: ForecastScenario
     for (const role of plan.roles) {
       const first = shiftForecastDate(role.start, shift), last = shiftForecastDate(role.end, shift);
       if (time(last) < startTime || time(first) >= horizon) continue;
+      if (data.capabilities?.some(item => item.kind === "role") && resolver.resolve("role", role.name).status !== "resolved") {
+        warningSet.add(`“${role.name}” is not aligned to a unique workspace role. Review the role mapping before a hiring decision.`);
+      }
       const matchKey = JSON.stringify([role.name.toLocaleLowerCase("en-US"), [...role.skills].map(skill => skill.toLocaleLowerCase("en-US")).sort()]);
       let matches = matchCache.get(matchKey);
       if (!matches) {
         matchingChecks += people.length * (role.skills.length + 1);
         if (matchingChecks > MAX_FORECAST_CHECKS) throw tooLarge();
         const roleKey = canonical("role", role.name), skills = role.skills.map(skill => canonical("skill", skill));
-        matches = people.filter(person => { const profile = profiles.get(person.id)!; return profile.roles.has(roleKey) && skills.every(skill => profile.skills.has(skill)); });
+        matches = people.filter(person => { const profile = profiles.get(person.id)!; return roleKey !== null && profile.roles.has(roleKey) && skills.every(skill => skill !== null && profile.skills.has(skill)); });
         matchCache.set(matchKey, matches);
       }
       demand.push({ key: `${mission.id}:${role.id}`, missionId: mission.id, missionName: mission.name,

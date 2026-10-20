@@ -11,10 +11,11 @@ const result = (): SowIntakeResult => ({
   uncertainties: ["What allocation percentage is needed for the data engineers?", "Confirm whether these roles span the full engagement."],
 });
 
-async function mockWorkspace(page: Page) {
+async function mockWorkspace(page: Page, setup: LocalAdminCommand[] = []) {
   let store = seedLocalAdminClients(createLocalAdminStore());
   store = applyLocalAdminCommand(store, { type: "save_home", name: "Data", code: "DATA", description: "" });
   store = applyLocalAdminCommand(store, { type: "save_resource", name: "Taylor Reed", home: "DATA", ownerId: LOCAL_ADMIN_OWNER_ID, profile: { roles: ["Data engineer"], skills: ["SQL", "Python"] } });
+  for (const command of setup) store = applyLocalAdminCommand(store, command);
   const writes: LocalAdminCommand[] = [];
   await page.route("**/api/shared/session", route => route.fulfill({ json: { authenticated: true, configured: true } }));
   await page.route("**/api/shared/admin", async route => {
@@ -38,6 +39,146 @@ async function openReader(page: Page) {
   await page.getByRole("button", { name: /Start from an SOW/ }).click();
   await expect(page.getByRole("heading", { name: /Big plans/ })).toBeVisible();
 }
+
+async function alignmentBoard(page: Page, editOutput?: (output: SowIntakeResult) => void) {
+  const workspace = await mockWorkspace(page, [
+    { type: "save_capability", kind: "role", name: "Business Analyst", description: "Requirements and analysis" },
+    { type: "save_capability", kind: "role", name: "Data Engineering Lead", description: "Engineering delivery" },
+    { type: "save_capability", kind: "skill", name: "SQL", description: "Relational querying" },
+    { type: "save_resource", name: "Avery Analyst", home: "DATA", ownerId: LOCAL_ADMIN_OWNER_ID, profile: { roles: ["Business Analyst"], skills: [] } },
+    { type: "save_resource", name: "Casey Lead", home: "DATA", ownerId: LOCAL_ADMIN_OWNER_ID, profile: { roles: ["Data Engineering Lead"], skills: ["SQL"] } },
+  ]);
+  const output: SowIntakeResult = {
+    draftOnly: true, source: { name: "Pasted brief", kind: "text" },
+    draft: {
+      clientName: "TQL", name: "Enterprise data platform", sowReference: null, status: "draft", signedOn: null,
+      start: "2027-01-01", end: "2027-12-31", outcomes: "Modernize the data platform.",
+      roles: [
+        { name: "Business Analyst (BA)", headcount: 1, allocationPercent: 100, skills: [], responsibilities: "Discover requirements.", start: "2027-01-01", end: "2027-12-31" },
+        { name: "Data Lead", headcount: 1, allocationPercent: 100, skills: ["SQL"], responsibilities: "Lead SQL delivery.", start: "2027-01-01", end: "2027-12-31" },
+      ],
+    },
+    evidence: [
+      { field: "roles.0.name", quote: "One Business Analyst (BA) will discover requirements.", verified: true },
+      { field: "roles.1.name", quote: "One Data Lead will lead SQL delivery.", verified: true },
+      { field: "roles.1.skills", quote: "The Data Lead needs SQL.", verified: true },
+    ],
+    uncertainties: ["Confirm any skill requirements for the Business Analyst (BA)."],
+  };
+  editOutput?.(output);
+  let reads = 0;
+  await reader(page, async route => { reads++; await route.fulfill({ json: output }); });
+  await openReader(page);
+  await page.getByRole("button", { name: "Paste a brief", exact: true }).click();
+  await page.getByLabel("Paste the SOW or workstream brief").fill("TQL Enterprise data platform runs from January 1 through December 31, 2027. One Business Analyst (BA) will discover requirements. One Data Lead will lead SQL delivery. The Data Lead needs SQL. Both roles are full-time throughout the year.");
+  await page.getByRole("button", { name: "Bring the plan to life" }).click();
+  await expect(page.getByLabel("Engagement / workstream name")).toHaveValue(output.draft.name!);
+  await page.getByRole("button", { name: "Build the team", exact: true }).click();
+  return { ...workspace, output, reads: () => reads };
+}
+
+test("SOW roles align to the catalog, uncertain titles require a choice, and role matches exclude skill-only overlap", async ({ page }) => {
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  const workspace = await alignmentBoard(page);
+  const analystCard = page.locator(".ts-role-card").filter({ has: page.getByRole("heading", { name: "Business Analyst", exact: true }) });
+  const leadCard = page.locator(".ts-role-card").filter({ has: page.getByRole("heading", { name: "Data Lead", exact: true }) });
+  await expect(analystCard).toHaveCount(1);
+  await expect(analystCard.getByLabel("Workspace role for Business Analyst (BA)", { exact: true }).locator("option:checked")).toHaveText("Business Analyst");
+  await expect(analystCard.getByText("No skill requirements · Matching by role", { exact: true })).toBeVisible();
+  const roleMatches = page.getByRole("button", { name: /^Role matches/ });
+  await expect(roleMatches).toHaveText("Role matches 1");
+  await expect(roleMatches).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Select Avery Analyst for Business Analyst", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Select Taylor Reed for Business Analyst", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Select Avery Analyst for Business Analyst", exact: true }).click();
+
+  await leadCard.locator(".ts-role-heading").click();
+  await expect(roleMatches).toHaveText("Role matches 0");
+  await expect(page.locator(".ts-people-list .ts-person")).toHaveCount(0);
+  await expect(leadCard.getByRole("button", { name: "Use Data Engineering Lead for Data Lead", exact: true })).toBeVisible();
+  await page.screenshot({ path: "test-results/role-alignment-desktop.png", fullPage: true });
+  expect(workspace.writes).toHaveLength(0);
+  await leadCard.getByRole("button", { name: "Use Data Engineering Lead for Data Lead", exact: true }).click();
+  const alignedLead = page.locator(".ts-role-card").filter({ has: page.getByRole("heading", { name: "Data Engineering Lead", exact: true }) });
+  await expect(alignedLead.getByLabel("Workspace role for Data Lead", { exact: true }).locator("option:checked")).toHaveText("Data Engineering Lead");
+  await expect(roleMatches).toHaveText("Role matches 1");
+  await expect(page.getByRole("button", { name: "Select Casey Lead for Data Engineering Lead", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Select Taylor Reed for Data Engineering Lead", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "All people", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Select Taylor Reed for Data Engineering Lead", exact: true })).toBeVisible();
+  await roleMatches.click();
+  await page.getByRole("button", { name: "Select Casey Lead for Data Engineering Lead", exact: true }).click();
+  expect(workspace.reads()).toBe(1);
+  expect(workspace.writes).toHaveLength(0);
+
+  await page.getByRole("button", { name: "Review team plan", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Enterprise data platform" });
+  await dialog.getByRole("button", { name: "Save team plan", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(workspace.writes).toHaveLength(1);
+  const saved = workspace.store().data.missions[0].engagement!;
+  expect(saved.roles).toMatchObject([
+    { name: "Business Analyst", sourceName: "Business Analyst (BA)", skills: [] },
+    { name: "Data Engineering Lead", sourceName: "Data Lead", skills: ["SQL"] },
+  ]);
+  expect(saved.roles.every(role => role.selectedResourceIds?.length === 1)).toBe(true);
+  expect(saved.intake?.evidence).toEqual(workspace.output.evidence);
+  expect(workspace.store().data.resources.find(resource => resource.name === "Avery Analyst")?.profile?.skills).toEqual([]);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1, name: "Enterprise data platform" })).toBeVisible();
+  await expect(page.getByLabel("Workspace role for Business Analyst (BA)", { exact: true }).locator("option:checked")).toHaveText("Business Analyst");
+  await expect(page.getByLabel("Workspace role for Data Lead", { exact: true }).locator("option:checked")).toHaveText("Data Engineering Lead");
+  await page.locator(".ts-source-notes > summary").click();
+  await expect(page.getByText("One Business Analyst (BA) will discover requirements.", { exact: true })).toBeVisible();
+  await expect(page.getByText("One Data Lead will lead SQL delivery.", { exact: true })).toBeVisible();
+  expect(workspace.reads()).toBe(1);
+  expect(workspace.writes).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test("SOW role alignment stays usable on a 320px phone and needs no second model read", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  const workspace = await alignmentBoard(page);
+  const choice = page.getByLabel("Workspace role for Data Lead", { exact: true });
+  await expect(choice).toBeVisible();
+  await expect(choice).toBeEnabled();
+  const size = await page.evaluate(() => ({ content: document.documentElement.scrollWidth, viewport: innerWidth }));
+  expect(size.content).toBeLessThanOrEqual(size.viewport);
+  await page.screenshot({ path: "test-results/role-alignment-mobile.png", fullPage: true });
+  const suggestion = page.getByRole("button", { name: "Use Data Engineering Lead for Data Lead", exact: true });
+  await suggestion.focus();
+  await page.keyboard.press("Enter");
+  await expect(choice.locator("option:checked")).toHaveText("Data Engineering Lead");
+  await expect(page.getByRole("heading", { name: "Data Engineering Lead", exact: true })).toBeVisible();
+  expect(workspace.reads()).toBe(1);
+  expect(workspace.writes).toHaveLength(0);
+});
+
+test("an unnamed SOW role can be aligned and saved without inventing an empty source title", async ({ page }) => {
+  const workspace = await alignmentBoard(page, output => {
+    output.draft.roles = [{ ...output.draft.roles[0], name: null }];
+    output.evidence = [];
+    output.uncertainties = ["Confirm the delivery role for this position."];
+  });
+  await expect(page.getByRole("heading", { name: "Name this role", exact: true })).toBeVisible();
+  await page.locator(".role-alignment select").selectOption({ label: "Business Analyst" });
+  await expect(page.getByRole("heading", { name: "Business Analyst", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Review team plan", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Enterprise data platform" });
+  await dialog.getByRole("button", { name: "Save team plan", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(workspace.writes).toHaveLength(1);
+  const saved = workspace.store().data.missions[0].engagement!;
+  expect(saved.roles[0].name).toBe("Business Analyst");
+  expect(saved.roles[0].sourceName).toBeUndefined();
+  expect(saved.roles[0].skills).toEqual([]);
+  expect(saved.intake?.uncertainties).toEqual(workspace.output.uncertainties);
+  expect(workspace.reads()).toBe(1);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Business Analyst", exact: true })).toBeVisible();
+  expect(workspace.writes).toHaveLength(1);
+});
 
 test("pasted SOW becomes an editable brief and team board; reviewed facts and original quotations survive saving and reload", async ({ page }) => {
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));

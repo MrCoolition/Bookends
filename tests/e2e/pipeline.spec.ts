@@ -109,6 +109,61 @@ test("a potential SOW saves configurable role demand and remains separate from s
   expect(errors).toEqual([]);
 });
 
+test("an imported potential SOW aligns an unresolved title without inventing skills and updates the hiring forecast", async ({ page }) => {
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  let seed = baseWorkspace();
+  seed = applyLocalAdminCommand(seed, { type: "save_capability", kind: "role", name: "Data Engineering Lead", description: "Lead data delivery" });
+  const lead = seed.data.resources.find(person => person.name === "Morgan Example")!;
+  seed = applyLocalAdminCommand(seed, { type: "save_resource", id: lead.id, expectedRevision: lead.revision, name: lead.name, home: lead.home, ownerId: lead.ownerId, profile: { ...lead.profile!, roles: ["Data Engineering Lead"] } });
+  const potential = seed.data.missions.find(mission => mission.name === "Potential analytics")!;
+  const originalRole = { ...potential.engagement!.roles[0], name: "Data Lead", headcount: 2 };
+  const intake: NonNullable<EngagementPlan["intake"]> = {
+    sourceName: "analytics-proposal.txt", sourceKind: "text",
+    evidence: [{ field: "roles.0.name", quote: "Data Lead", verified: true }], uncertainties: [],
+  };
+  // Older imported plans did not retain a separate role sourceName.
+  seed = applyLocalAdminCommand(seed, { type: "save_mission", id: potential.id, expectedRevision: potential.revision, name: potential.name, clientId: potential.clientId, engagement: { ...potential.engagement!, roles: [originalRole], intake } });
+  const state = await mockWorkspace(page, seed), sourcePeople = structuredClone(seed.data.resources), baseline = structuredClone(seed.data.missions[0]);
+  await page.goto("/pipeline");
+  await page.getByLabel("Planning start", { exact: true }).fill(START);
+  await page.getByRole("button", { name: "Include Potential analytics", exact: true }).click();
+  await expect(page.getByLabel("Peak uncovered positions", { exact: true })).toContainText("2 positions");
+  const before = page.locator(".pf-hiring-row").filter({ hasText: "Potential analytics" });
+  await before.locator("summary").click();
+  await expect(before).toContainText("No matching teammate profiles.");
+  await expect(before.locator(".pf-candidates > div")).toHaveCount(0);
+
+  await page.getByRole("tab", { name: /^Pipeline/ }).click();
+  await page.getByRole("button", { name: "Edit Potential analytics", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Edit potential SOW", exact: true });
+  await editor.locator(".pf-role-editor-heading").filter({ hasText: "Data Lead" }).click();
+  await expect(editor.locator(".role-alignment-status")).toHaveText("Needs a workspace role");
+  await expect(editor.getByRole("button", { name: "Use Data Engineering Lead for Data Lead", exact: true })).toBeVisible();
+  await editor.getByRole("combobox", { name: "Workspace role for Data Lead", exact: true }).selectOption({ label: "Data Engineering Lead" });
+  await expect(editor.getByLabel("Role name", { exact: true })).toHaveValue("Data Engineering Lead");
+  await expect(editor.locator(".role-alignment-status")).toHaveText("Role aligned");
+  await expect(editor.locator(".role-alignment-source")).toContainText("Data Lead");
+  await expect(editor.getByRole("list", { name: "Selected skills", exact: true })).toContainText("SQL");
+  await editor.getByRole("button", { name: "Save potential", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+
+  expect(state.writes.map(command => command.type)).toEqual(["save_mission"]);
+  const saved = state.store.data.missions.find(mission => mission.id === potential.id)!;
+  expect(saved.engagement!.roles).toEqual([{ ...originalRole, name: "Data Engineering Lead", sourceName: "Data Lead" }]);
+  expect(saved.engagement!.intake).toEqual(intake);
+  expect(state.store.data.resources).toEqual(sourcePeople);
+  expect(state.store.data.missions[0]).toEqual(baseline);
+  await page.getByRole("tab", { name: "What if", exact: true }).click();
+  await expect(page.getByLabel("Peak uncovered positions", { exact: true })).toContainText("1 positions");
+  const after = page.locator(".pf-hiring-row").filter({ hasText: "Potential analytics" });
+  await expect(after.locator("h3")).toHaveText("Data Engineering Lead");
+  if (await after.getAttribute("open") === null) await after.locator("summary").click();
+  await expect(after.locator(".pf-candidates > div")).toHaveCount(1);
+  await expect(after.locator(".pf-candidates")).toContainText("Morgan Example");
+  await expect(after.locator(".pf-candidates")).toContainText("Available");
+  expect(errors).toEqual([]);
+});
+
 test("session expiration keeps the potential SOW draft through re-unlock", async ({ page }) => {
   const state = await mockWorkspace(page);
   await page.goto("/pipeline");

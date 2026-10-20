@@ -11,6 +11,7 @@ import "./sow-intake.css";
 import "./capability-controls.css";
 import "./capability-admin.css";
 import "./pipeline.css";
+import "./role-alignment.css";
 export const metadata: Metadata = {
   title: "BOOKENDS — Every ending. A new beginning.",
   description: "Your people. Their next mission. One extraordinary view. Explore the BOOKENDS resource alignment workspace.",
