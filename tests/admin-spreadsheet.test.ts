@@ -253,8 +253,9 @@ const templateUrl=new URL("../public/templates/BOOKENDS_Seed_Template.xlsx",impo
 async function templateFile() { return new File([new Uint8Array(await readFile(templateUrl))],"BOOKENDS_Seed_Template.xlsx"); }
 test("actual blank Excel template parses quickly without importing its 1000 formatted empty rows", async () => {
   const workbook=await readSpreadsheetFile(await templateFile());
-  assert.deepEqual(workbook.sheets.map(sheet=>sheet.name),["HOMEs","Clients","People","Missions","Engagements","Engagement roles","Roles","Skills"]);
+  assert.deepEqual(workbook.sheets.map(sheet=>sheet.name),["HOMEs","Clients","People","Missions","Engagements","Engagement roles","Roles","Skills","Client bookends"]);
   assert.deepEqual(workbook.sheets.find(sheet => sheet.name === "People")!.rows[3], [...SPREADSHEET_HEADERS.People].slice(0, 6));
+  assert.deepEqual(workbook.sheets.find(sheet => sheet.name === "Client bookends")!.rows[3], [...SPREADSHEET_HEADERS["Client bookends"]]);
   const plan=planSpreadsheetImport(createLocalAdminStore(),workbook);
   assert.deepEqual(plan.errors,[]);assert.deepEqual(plan.counts,{adds:0,updates:0,skips:0});
 });

@@ -86,3 +86,14 @@ The connected Vercel project deploys pushes to `main`. A deployment never runs m
 ## Rebuild the Excel template
 
 `scripts/build-seed-template.mjs` uses the bundled `@oai/artifact-tool` runtime, without adding application dependencies. Set `BOOKENDS_ARTIFACT_NODE_MODULES` to that runtime's `node_modules` directory and `BOOKENDS_ARTIFACT_PYTHON` to its Python executable, then run the script with the bundled Node executable. Use `load_workspace_dependencies` in Codex to locate those paths. The builder writes `public/templates/BOOKENDS_Seed_Template.xlsx` and ignored previews under `.tmp/bookends-seed/`; `--render-before` only inspects and renders the current guide. Review the generated tabs and run the spreadsheet tests after changing the template.
+
+
+## Client bookends
+
+In **Admin → Clients → Edit → Client bookends**, configure recurring or one-time entry/exit windows, advance notice, expiry, and excluded dates. Required windows must overlap; advisory windows stay visible without moving the plan. A window is an allowed start/end period, not onboarding duration or proof that prerequisites are complete.
+
+Team Studio shows each phased role's planned date, next eligible date, and waiting period. Explicit draft actions preserve role duration when moving a start or extend the role when moving its end. What if retains demand on the proposed dates until **Try +N days for this SOW** is selected; this shifts the scenario and recalculates capacity/hiring without modifying the saved SOW, signed work, or commitments. Notice is conservatively checked from planning start (or a later expected close); confirm existing bookings separately. Searches are bounded to ten years.
+
+**Export Excel** includes editable **Client bookends** rows with stable rule IDs and client revisions. Omitted sheets/rows preserve existing rules. Set Active to FALSE to pause a rule. Export current data before updating existing clients; the blank template supports new clients and rules together.
+
+Shared passcode workspaces persist bookends in their existing Neon JSON record and need no structural migration. The separately authenticated, normalized Admin service requires **0005_client_bookends.sql** before activation. Run the reviewed migration process with `MIGRATION_DATABASE_URL`; deployments do not apply migrations automatically. Legacy clients without bookends keep their current behavior.

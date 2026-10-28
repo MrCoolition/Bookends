@@ -69,6 +69,19 @@ test("one persistent seeded workspace is visible across sessions; stale edits do
   assert.deepEqual(audit.rows, [{ action: "save_home", session_id: session.sessionId }]);
 });
 
+test("shared client bookends persist across sessions, preserve older saves and enforce revisions", async () => {
+  const workspaceId = "bookend-test", timingSession = { ...session, workspaceId };
+  const first = await scoped(workspaceId, query => loadSharedStore(query, workspaceId)), client = first.data.clients[0];
+  const bookends = [{ id: randomUUID(), name: "Client welcome", purpose: "onboarding", phase: "start", enforcement: "required", cadence: "weeks", every: 2, anchorDate: "2027-01-04", windowDays: 1, noticeDays: 0, until: null, active: true, notes: "" }];
+  const fields = { type: "save_client", id: client.id, expectedRevision: client.revision, name: client.name, code: client.code, contactName: client.contactName, contactEmail: client.contactEmail, notes: client.notes };
+  const saved = await scoped(workspaceId, query => saveSharedStore(query, timingSession, { expectedRevision: first.revision, command: { ...fields, bookends } }, "command"));
+  const loaded = await scoped(workspaceId, query => loadSharedStore(query, workspaceId));
+  assert.deepEqual(loaded.data.clients.find(item => item.id === client.id)!.bookends, bookends);
+  const edited = await scoped(workspaceId, query => saveSharedStore(query, timingSession, { expectedRevision: saved.revision, command: { ...fields, expectedRevision: client.revision + 1, notes: "Updated contact context" } }, "command"));
+  assert.deepEqual(edited.data.clients.find(item => item.id === client.id)!.bookends, bookends);
+  await assert.rejects(scoped(workspaceId, query => saveSharedStore(query, timingSession, { expectedRevision: saved.revision, command: { ...fields, bookends: [] } }, "command")), status(409));
+});
+
 test("reviewed import is atomic, validates references, and retains shared revision monotonicity", async () => {
   const current = await scoped("main", query => loadSharedStore(query, "main"));
   const next = applyLocalAdminCommand(current, { type: "save_client", code: "IMPORT", name: "Imported client", contactName: "", contactEmail: "", notes: "" });

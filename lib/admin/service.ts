@@ -6,6 +6,7 @@ import { actorFor, OperationsError, type Membership, type OperationsQuery } from
 import type { AdminBootstrap, AdminCapability, AdminCommand, AdminGrant, AdminMember, AdminRequest } from "./contracts";
 import { capabilityAliasesAfterRename, capabilitySchema, engagementPlanSchema, profileSchema, type EngagementPlan } from "./engagement";
 import { plannedTeamReferenceIssues } from "../studio/team";
+import { clientBookendsSchema } from "../scheduling/client-bookends";
 
 function requireAdmin(member: Membership) {
   if (!member.active || member.role !== "administrator" || member.home_scope !== null) throw new OperationsError("forbidden", "An active organization administrator is required.", 403);
@@ -53,7 +54,7 @@ export async function loadAdmin(db: OperationsQuery, member: Membership): Promis
   const org = member.organization_id;
   const organization = (await db.query<{id:string;name:string;revision:number}>("SELECT id,name,revision FROM be_organizations WHERE id=$1", [org])).rows[0];
   if (!organization) throw new OperationsError("not_found", "This organization is unavailable.", 404);
-  const clients = (await db.query<{id:string;name:string;code:string;contact_name:string|null;contact_email:string|null;notes:string;active:boolean;revision:number}>("SELECT id,name,code,contact_name,contact_email,notes,active,revision FROM be_clients WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows.map(row => ({ id: row.id, name: row.name, code: row.code, contactName: row.contact_name ?? "", contactEmail: row.contact_email ?? "", notes: row.notes, active: row.active, revision: row.revision }));
+  const clients = (await db.query<{id:string;name:string;code:string;contact_name:string|null;contact_email:string|null;notes:string;active:boolean;revision:number;bookends:unknown}>("SELECT id,name,code,contact_name,contact_email,notes,active,revision,bookends FROM be_clients WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows.map(row => ({ id: row.id, name: row.name, code: row.code, contactName: row.contact_name ?? "", contactEmail: row.contact_email ?? "", notes: row.notes, active: row.active, revision: row.revision, ...(row.bookends == null ? {} : { bookends: clientBookendsSchema.parse(row.bookends) }) }));
   const homes = (await db.query<{id:string;code:string;name:string;description:string;active:boolean;revision:number}>("SELECT id,code,name,description,active,revision FROM be_homes WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows;
   const resources = (await db.query<{id:string;name:string;home:string;owner_id:string;active:boolean;revision:number;profile:unknown}>("SELECT id,name,home,owner_id,active,revision,profile FROM be_resources WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows.map(row => ({ id: row.id, name: row.name, home: row.home, ownerId: row.owner_id, active: row.active, revision: row.revision, ...(row.profile ? { profile: profileSchema.parse(row.profile) } : {}) }));
   const missions = (await db.query<{id:string;name:string;client_id:string;active:boolean;revision:number;engagement:unknown}>("SELECT id,name,client_id,active,revision,engagement FROM be_missions WHERE organization_id=$1 ORDER BY name,id LIMIT 1001", [org])).rows.map(row => ({ id: row.id, name: row.name, clientId: row.client_id, active: row.active, revision: row.revision, ...(row.engagement ? { engagement: engagementPlanSchema.parse(row.engagement) } : {}) }));
@@ -93,9 +94,10 @@ async function applyAdmin(db: OperationsQuery, member: Membership, command: Admi
       if (command.id) {
         const current = await lock(db, org, "be_clients", id); revision(Number(current.revision), command.expectedRevision);
         if (current.code !== command.code) throw new OperationsError("immutable_code", "The client code stays stable. Change its display name instead.");
-        await db.query("UPDATE be_clients SET name=$3,contact_name=$4,contact_email=$5,notes=$6,revision=revision+1 WHERE organization_id=$1 AND id=$2", [org, id, command.name, command.contactName, command.contactEmail, command.notes]);
+        const bookends = command.bookends ?? current.bookends;
+        await db.query("UPDATE be_clients SET name=$3,contact_name=$4,contact_email=$5,notes=$6,bookends=$7,revision=revision+1 WHERE organization_id=$1 AND id=$2", [org, id, command.name, command.contactName, command.contactEmail, command.notes, bookends == null ? null : JSON.stringify(bookends)]);
         await db.query("UPDATE be_missions SET client_name=$3,revision=revision+1 WHERE organization_id=$1 AND client_id=$2 AND client_name<>$3", [org, id, command.name]);
-      } else await db.query("INSERT INTO be_clients(organization_id,id,code,name,contact_name,contact_email,notes) VALUES($1,$2,$3,$4,$5,$6,$7)", [org, id, command.code, command.name, command.contactName, command.contactEmail, command.notes]);
+      } else await db.query("INSERT INTO be_clients(organization_id,id,code,name,contact_name,contact_email,notes,bookends) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", [org, id, command.code, command.name, command.contactName, command.contactEmail, command.notes, command.bookends === undefined ? null : JSON.stringify(command.bookends)]);
       await audit(db, member, command.type, { clientId: id }); return;
     }
     case "save_home": {

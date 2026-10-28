@@ -1,0 +1,44 @@
+/* Client-owned timing windows: a compact calendar rhythm, beside the client facts. */
+.client-bookends-editor{border-top:1px solid #dce4ef;padding-top:23px;margin-top:2px}
+.client-bookends-editor>header{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.client-bookends-heading-icon{display:grid;place-items:center;width:42px;height:42px;background:#edf1ff;color:#315be3;border-radius:11px;flex-shrink:0}
+.client-bookends-editor h3{font-size:19px;letter-spacing:-.45px;font-weight:600;color:#1e2c49;margin:0}
+.client-bookends-editor h3>span{font-size:11px;color:#315be3;margin-left:6px}
+.client-bookends-editor>header p{font-size:11px;color:#63738d;margin:4px 0 0;line-height:1.6}
+.client-bookends-editor>header>.admin-button{margin-left:auto;font-size:11px!important;white-space:nowrap;padding:9px 12px;min-height:40px}
+.client-bookends-empty{display:flex;gap:12px;align-items:center;padding:17px;border:1px dashed #cdd8ef;border-radius:9px;background:#f8faff;color:#4d6691}
+.client-bookends-empty>svg{color:#315be3;flex-shrink:0}.client-bookends-empty>p,.client-bookends-explainer{font-size:11px;line-height:1.8;margin:0}
+.client-bookends-explainer{color:#5b6f8b;margin:0 0 14px}
+.client-bookends-list{display:flex;flex-direction:column;gap:10px}
+.client-bookend-card{border:1px solid #d7e0f2;border-radius:10px;background:#fff;overflow:clip}
+.client-bookend-card.is-paused{border-color:#e2e6ec}.client-bookend-card.is-paused .client-bookend-number{background:#edf0f4;color:#738198}
+.client-bookend-toggle{display:flex;align-items:center;gap:12px;text-align:left;width:100%;border:0;padding:15px;background:#f6f8ff;cursor:pointer;color:#213653}
+.client-bookend-toggle[aria-expanded=true]{border-bottom:1px solid #dfe6f5}.client-bookend-toggle[aria-expanded=true]>svg{transform:rotate(180deg)}
+.client-bookend-toggle>span:nth-child(2){display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.client-bookend-toggle strong{font-size:13px;font-weight:600;overflow-wrap:anywhere}.client-bookend-toggle small{font-size:10px;line-height:1.6;color:#586f95}
+.client-bookend-number{display:grid;place-items:center;width:30px;height:34px;border-radius:7px;background:#e8eeff;color:#315be3;font-size:11px;flex-shrink:0}
+.client-bookend-kind{font-size:9px;color:#55709b;white-space:nowrap}.client-bookend-toggle>svg{flex-shrink:0;color:#6882ac}
+.client-bookend-body{display:flex;flex-direction:column;gap:17px;padding:18px}
+.client-bookend-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.client-bookend-repeat{display:grid;grid-template-columns:minmax(0,1fr) 75px;gap:10px}.client-bookend-repeat>label:only-child{grid-column:1/-1}
+.client-bookend-full{grid-column:1/-1}.admin-form .client-bookend-body textarea{min-height:70px}
+.client-bookend-preview{padding:13px;border:1px solid #dae3f7;border-radius:8px;background:#f8faff;min-width:0}
+.client-bookend-preview-title{display:flex;align-items:center;gap:7px;color:#315be3;font-size:10px;line-height:1.5;flex-wrap:wrap}
+.client-bookend-preview-title>strong{font-weight:600}.client-bookend-preview-title>span{margin-left:auto;font-size:9px;color:#657995}
+.client-bookend-preview>ol{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));list-style:none;gap:8px;padding:0;margin:12px 0 0}
+.client-bookend-preview li{display:flex;flex-direction:column;gap:5px;background:#fff;border:1px solid #dce5f5;border-top:3px solid #bdcafa;border-radius:5px;padding:11px 9px}
+.client-bookend-preview li:first-child{border-top-color:#315be3}.client-bookend-preview li>span{font-size:7px;letter-spacing:1px;color:#5874a7}
+.client-bookend-preview li>strong{font-size:12px;font-weight:600;color:#263c61;line-height:1.5}.client-bookend-preview li>small{font-size:9px;line-height:1.5;color:#667b9a}
+.client-bookend-preview li>em{font-size:8px;line-height:1.6;font-style:normal;color:#a0513b;padding-top:5px;border-top:1px solid #edf0f5;margin-top:2px}
+.client-bookend-preview>p{font-size:11px;line-height:1.8;color:#63738d;margin:10px 0 0}
+.client-bookend-advanced>summary{display:flex;align-items:center;gap:7px;font-size:11px;color:#46658f;cursor:pointer;list-style:none;min-height:40px}
+.client-bookend-advanced>summary>svg:last-child{margin-left:auto}.client-bookend-advanced[open]>summary>svg:last-child{transform:rotate(180deg)}
+.client-bookend-advanced>.client-bookend-fields{padding-top:12px;border-top:1px solid #e6ebf3}
+.client-bookend-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:10px;border-top:1px solid #e6ebf3}
+.admin-form label.client-bookend-active{display:flex;flex-direction:row;align-items:center;gap:7px;font-size:11px;cursor:pointer;color:#315be3}
+.admin-form .client-bookend-active input{width:16px;height:16px;margin:0;accent-color:#315be3}
+.admin-form .client-bookend-active>span{font-size:11px;margin:0;color:inherit}.client-bookend-actions>.admin-text-button{font-size:10px!important;min-height:36px}
+.client-bookend-error{font-size:11px;line-height:1.7;color:#a14d32;background:#fff3ed;border:1px solid #f0d9cc;border-radius:5px;padding:10px 12px;margin:0}
+.client-bookend-summary{display:inline-flex;align-items:center;gap:6px;color:#315be3;font-size:10px;line-height:1.7}.client-bookend-summary>svg{flex-shrink:0}.client-bookend-summary small{font-size:inherit;color:#697d9a}
+.client-bookends-editor :is(button,summary,input,select,textarea):focus-visible{outline:3px solid #809aff;outline-offset:3px}
+@media(max-width:650px){.client-bookends-editor>header{flex-wrap:wrap;gap:10px}.client-bookends-editor h3{font-size:17px}.client-bookends-editor>header>.admin-button{margin-left:52px;margin-top:-4px}.client-bookend-body{padding:14px}.client-bookend-fields{grid-template-columns:minmax(0,1fr);gap:14px}.client-bookend-toggle{gap:9px;padding:12px}.client-bookend-kind{font-size:8px;max-width:64px;white-space:normal;text-align:right;line-height:1.6}.client-bookend-preview-title>span{margin-left:0;width:100%;padding-left:22px}.client-bookend-preview li{padding:9px 7px}.client-bookend-preview li>strong{font-size:10px}.client-bookend-preview li>small{font-size:8px}.client-bookends-explainer{font-size:10px}.client-bookend-summary{font-size:9px}}

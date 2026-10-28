@@ -4,6 +4,7 @@ import { LOCAL_ADMIN_OWNER_ID, parseLocalAdminCommand, parseLocalAdminStore, typ
 import type { AdminCapability, AdminClient, AdminHome, AdminMission, AdminResource } from "./contracts";
 import { capabilityAliasesAfterRename, capabilityNameKey, engagementPlanSchema, type EngagementPlan, type EngagementRole, type ResourceProfile } from "./engagement";
 import { formatNamedList, parseNamedList } from "./named-list";
+import { clientBookendsSchema, type ClientBookend } from "../scheduling/client-bookends";
 
 export const MAX_SPREADSHEET_BYTES = 5 * 1024 * 1024;
 const MAX_UNCOMPRESSED_BYTES = 20 * 1024 * 1024;
@@ -11,6 +12,7 @@ const MAX_ROWS = 1004, MAX_COLUMNS = 64, MAX_RECORDS = 1000;
 export const SPREADSHEET_HEADERS = {
   HOMEs: ["HOME code", "HOME name", "Description", "Record ID", "Revision", "Active"],
   Clients: ["Client code", "Client name", "Contact name", "Contact email", "Notes", "Record ID", "Revision", "Active"],
+  "Client bookends": ["Client code", "Bookend name", "Purpose", "Phase", "Enforcement", "Cadence", "Every", "Anchor date", "Window days", "Notice days", "Until date", "Excluded dates", "Notes", "Rule ID", "Client ID", "Revision", "Active"],
   People: ["Person name", "HOME code", "Owner name", "Delivery roles", "Skills", "Designation", "Record ID", "Revision", "Active"],
   Missions: ["Mission name", "Client code", "Record ID", "Revision", "Active"],
   Engagements: ["Engagement name", "Client code", "SOW reference", "Status", "Signed on", "Start date", "End date", "Outcomes", "Source", "Record ID", "Revision", "Active", "Pipeline stage", "Confidence %", "Expected close"],
@@ -59,6 +61,7 @@ function requiredHeaders(name: SpreadsheetSheetName): readonly string[] {
   if (name === "Roles" || name === "Skills") return ["Name"];
   if (name === "Engagements") return ["Engagement name", "Client code", "Start date", "End date"];
   if (name === "Engagement roles") return SPREADSHEET_HEADERS[name].slice(0, 5);
+  if (name === "Client bookends") return SPREADSHEET_HEADERS[name].slice(0, 10);
   return SPREADSHEET_HEADERS[name].slice(0, 2);
 }
 function mapRows(workbook: SpreadsheetWorkbook, errors: SpreadsheetIssue[]): ImportedRow[] {
@@ -67,12 +70,13 @@ function mapRows(workbook: SpreadsheetWorkbook, errors: SpreadsheetIssue[]): Imp
   for (const sheet of workbook.sheets) {
     if (sheet.name === "Start here" || isReferenceSheet(sheet.name)) continue;
     if (!isDataSheet(sheet.name)) {
-      if (sheet.rows.some(row => row.some(nonblank))) errors.push({ sheet: sheet.name, row: 1, field: "Sheet name", message: "Use HOMEs, Clients, People, Engagements, Engagement roles, Roles, Skills, or Missions for import data. Start here and the labeled workspace reference sheets are not imported." });
+      if (sheet.rows.some(row => row.some(nonblank))) errors.push({ sheet: sheet.name, row: 1, field: "Sheet name", message: "Use HOMEs, Clients, Client bookends, People, Engagements, Engagement roles, Roles, Skills, or Missions for import data. Start here and the labeled workspace reference sheets are not imported." });
       continue;
     }
     recognized++;
     if (seen.has(sheet.name)) { errors.push({ sheet: sheet.name, row: 1, field: "Sheet name", message: "This import contains the same sheet more than once." }); continue; }
     seen.add(sheet.name);
+    if (sheet.name === "Client bookends" && !sheet.rows.some(row => row.some(nonblank))) continue;
     const expected: readonly string[] = SPREADSHEET_HEADERS[sheet.name], rawHeaders = sheet.rows[3] ?? [];
     const headers = new Map<number, string>(), columns = new Set<string>();
     const issue = (row: number, field: string, message: string) => errors.push({ sheet: sheet.name, row, field, message });
@@ -107,7 +111,7 @@ function mapRows(workbook: SpreadsheetWorkbook, errors: SpreadsheetIssue[]): Imp
       if (errors.length === priorErrors && required.every(header => columns.has(header))) result.push({ sheet: sheet.name, row: index + 1, values, columns });
     }
   }
-  if (!recognized) errors.push({ sheet: "Workbook", row: 0, field: "Sheets", message: "Add at least one import sheet: HOMEs, Clients, People, Engagements, Engagement roles, Roles, Skills, or Missions." });
+  if (!recognized) errors.push({ sheet: "Workbook", row: 0, field: "Sheets", message: "Add at least one import sheet: HOMEs, Clients, Client bookends, People, Engagements, Engagement roles, Roles, Skills, or Missions." });
   return result;
 }
 function key(...values: string[]) { return JSON.stringify(values); }
@@ -131,7 +135,7 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
   }
   const engagementRows = new Map<string, ImportedRow>(), roleRows = new Map<string, ImportedRow>(), touchedEngagements = new Set<string>();
   const originalRecords = new Map([...store.data.homes, ...store.data.clients, ...store.data.resources, ...store.data.missions, ...(store.data.capabilities ?? [])].map(record => [record.id, record]));
-  const seenRecordIds = new Map<string, number>(), seenRoleIds = new Map<string, number>();
+  const seenRecordIds = new Map<string, number>(), seenRoleIds = new Map<string, number>(), seenBookends = new Map<string, number>();
   const rowIssue = (row: ImportedRow, field: string, message: string) => errors.push({ sheet: row.sheet, row: row.row, field, message });
   function listCell(row: ImportedRow, field: string, value: string) {
     const parsed = parseNamedList(value);
@@ -209,7 +213,7 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
     }
   }
   // Resolve parents first, regardless of worksheet order in the uploaded file.
-  for (const name of ["HOMEs", "Clients", "Roles", "Skills", "People", "Missions", "Engagements", "Engagement roles"] as const) for (const row of rows.filter(row => row.sheet === name)) {
+  for (const name of ["HOMEs", "Clients", "Client bookends", "Roles", "Skills", "People", "Missions", "Engagements", "Engagement roles"] as const) for (const row of rows.filter(row => row.sheet === name)) {
     const value = (header: string) => row.values.get(header) ?? "";
     if (name === "Roles" || name === "Skills") {
       const kind: AdminCapability["kind"] = name === "Roles" ? "role" : "skill", catalogKey = key(kind, capabilityNameKey(value("Name")));
@@ -231,6 +235,43 @@ function buildPlan(store: LocalAdminStore, workbook: SpreadsheetWorkbook) {
       const fields = { code, name: value("Client name"), contactName: row.columns.has("Contact name") ? value("Contact name") : found.existing?.contactName ?? "", contactEmail: row.columns.has("Contact email") ? value("Contact email") : found.existing?.contactEmail ?? "", notes: row.columns.has("Notes") ? value("Notes") : found.existing?.notes ?? "" };
       if (!validate(row, { type: "save_client", ...fields }, { code: "Client code", name: "Client name", contactName: "Contact name", contactEmail: "Contact email", notes: "Notes" })) continue;
       merge<AdminClient>(row, found.existing, fields, data.clients, clients, code, `${fields.name} · ${code}`);
+    } else if (name === "Client bookends") {
+      const clientCode = value("Client code"), clientId = value("Client ID"), ruleId = value("Rule ID");
+      const found = clientId ? data.clients.filter(item => item.id === clientId) : clients.get(clientCode) ?? [];
+      const client = found[0];
+      if (found.length !== 1 || !client || client.code !== clientCode) { rowIssue(row, "Client code", "Match one client code in the workspace or Clients sheet. Keep an exported Client ID linked to its original code."); continue; }
+      const original = store.data.clients.find(item => item.id === client.id);
+      if (original && !validRevision(row, client.id)) continue;
+      if (!original && (value("Revision") || clientId)) { rowIssue(row, "Revision", "For a client created in this workbook, leave Client ID and Revision blank."); continue; }
+      const rules = client.bookends ?? [], existing = ruleId ? rules.find(item => item.id === ruleId) : undefined;
+      if (ruleId && !existing) { rowIssue(row, "Rule ID", "This Rule ID does not belong to this client. Keep exported IDs unchanged; leave Rule ID blank for a new bookend."); continue; }
+      if (!existing && !client.active) { rowIssue(row, "Client code", "Reactivate this client before adding a new bookend."); continue; }
+      if (!ruleId && rules.some(item => item.name.toLocaleLowerCase("en-US") === value("Bookend name").toLocaleLowerCase("en-US"))) { rowIssue(row, "Rule ID", "A bookend with this name already exists. Export its Rule ID and client Revision to update it without creating a duplicate."); continue; }
+      const duplicateKey = key(client.id, ruleId || value("Bookend name").toLocaleLowerCase("en-US")), firstRow = seenBookends.get(duplicateKey);
+      if (firstRow !== undefined) { rowIssue(row, "Rule ID", `This bookend is already listed on row ${firstRow}. Keep one row per rule.`); continue; }
+      seenBookends.set(duplicateKey, row.row);
+      const active = value("Active").toLocaleLowerCase("en-US");
+      if (active && active !== "true" && active !== "false") { rowIssue(row, "Active", "Use TRUE or FALSE, or leave blank to keep the existing status."); continue; }
+      const excludedDates = row.columns.has("Excluded dates") ? listCell(row, "Excluded dates", value("Excluded dates")) : existing?.excludedDates;
+      if (excludedDates === null) continue;
+      const candidate = {
+        id: existing?.id ?? crypto.randomUUID(), name: value("Bookend name"), purpose: value("Purpose").toLowerCase(), phase: value("Phase").toLowerCase(),
+        enforcement: value("Enforcement").toLowerCase(), cadence: value("Cadence").toLowerCase(), every: Number(value("Every")), anchorDate: value("Anchor date"),
+        windowDays: Number(value("Window days")), noticeDays: Number(value("Notice days")), until: row.columns.has("Until date") ? value("Until date") || null : existing?.until ?? null,
+        notes: row.columns.has("Notes") ? value("Notes") : existing?.notes ?? "", active: activeValue(row, existing),
+        ...(excludedDates?.length || existing?.excludedDates ? { excludedDates: excludedDates ?? [] } : {}),
+      };
+      const labels: Record<string, string> = { name: "Bookend name", purpose: "Purpose", phase: "Phase", enforcement: "Enforcement", cadence: "Cadence", every: "Every", anchorDate: "Anchor date", windowDays: "Window days", noticeDays: "Notice days", until: "Until date", excludedDates: "Excluded dates", notes: "Notes", active: "Active" };
+      const parsed = clientBookendsSchema.safeParse(existing ? rules.map(item => item.id === existing.id ? candidate : item) : [...rules, candidate]);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) rowIssue(row, labels[String(issue.path[1])] ?? "Row", issue.message);
+        continue;
+      }
+      const next = parsed.data.find(item => item.id === candidate.id)!;
+      if (existing && equal(existing, next)) { changes.push({ sheet: row.sheet, row: row.row, action: "skip", label: `${next.name} · ${client.name}` }); continue; }
+      const fields = existing ? (Object.keys(next) as (keyof ClientBookend)[]).filter(field => !equal(existing[field], next[field])).map(field => ({ field: labels[field] ?? field, before: Array.isArray(existing[field]) ? formatNamedList(existing[field] as string[]) : String(existing[field] ?? ""), after: Array.isArray(next[field]) ? formatNamedList(next[field] as string[]) : String(next[field] ?? "") })) : undefined;
+      client.bookends = parsed.data; client.revision++;
+      changes.push({ sheet: row.sheet, row: row.row, action: existing ? "update" : "add", label: `${next.name} · ${client.name}`, fields });
     } else if (name === "People") {
       const suppliedHome = value("HOME code"), personName = value("Person name"), recordId = value("Record ID");
       const identifiedPerson = recordId ? data.resources.find(person => person.id === recordId) : undefined;
@@ -458,7 +499,7 @@ export async function readSpreadsheetFile(file: File): Promise<SpreadsheetWorkbo
           result.errors!.push({ sheet: sheet.name, row: rowNumber, field: columnName(column - 1), message: rowNumber > MAX_ROWS ? "Move data into rows 5–1004; later data cannot be imported." : "Move data into a supported template column; this column is outside the import area." }); return;
         }
         let value: SpreadsheetCell;
-        if (cell.value instanceof Date && Number.isFinite(cell.value.getTime()) && ["Start date", "End date", "Signed on", "Expected close"].some(header => String(sheet.getCell(4, column).value).trim().toLowerCase() === header.toLowerCase())) value = cell.value.toISOString().slice(0, 10);
+        if (cell.value instanceof Date && Number.isFinite(cell.value.getTime()) && ["Start date", "End date", "Signed on", "Expected close", "Anchor date", "Until date"].some(header => String(sheet.getCell(4, column).value).trim().toLowerCase() === header.toLowerCase())) value = cell.value.toISOString().slice(0, 10);
         else if (typeof cell.value === "number" && ["allocation %", "confidence %"].includes(String(sheet.getCell(4, column).value).trim().toLowerCase()) && (cell.numFmt ?? "").replace(/"[^"]*"|\\./g, "").includes("%")) value = cell.value * 100;
         else if (typeof cell.value === "string" || typeof cell.value === "number" || typeof cell.value === "boolean") value = cell.value;
         else if (typeof cell.value === "object" && ("formula" in cell.value || "sharedFormula" in cell.value)) value = { formula: String(cell.formula || "formula") };

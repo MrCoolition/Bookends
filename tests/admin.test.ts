@@ -108,6 +108,22 @@ test("clients support audited idempotent edits, stable codes, active dependencie
   assert.equal((await f.operations()).missions[0].active,true);
 });
 
+test("normalized clients persist bookends, preserve omitted schedules and reject stale changes", async t => {
+  const f=await fixture();t.after(()=>f.db.close());
+  const bookends = [{ id: randomUUID(), name: "Fortnightly onboarding", purpose: "onboarding" as const, phase: "start" as const, enforcement: "required" as const, cadence: "weeks" as const, every: 2, anchorDate: "2027-01-04", windowDays: 1, noticeDays: 3, until: null, active: true, notes: "Client intake", excludedDates: ["2027-02-01"] }];
+  const fields = { name: "Scheduled client", code: "scheduled", contactName: "", contactEmail: "", notes: "" };
+  await f.execute({ type: "save_client", ...fields, bookends });
+  const client = (await f.load()).clients.find(item => item.code === fields.code)!;
+  assert.deepEqual(client.bookends, bookends);
+  await f.execute({ type: "save_client", ...fields, id: client.id, expectedRevision: client.revision, name: "Renamed" });
+  assert.deepEqual((await f.load()).clients.find(item => item.id === client.id)!.bookends, bookends);
+  await assert.rejects(f.execute({ type: "save_client", ...fields, id: client.id, expectedRevision: client.revision, bookends: [] }), code("conflict"));
+  await f.execute({ type: "save_client", ...fields, id: client.id, expectedRevision: client.revision + 1, bookends: [{ ...bookends[0], active: false }] });
+  assert.equal((await f.load()).clients.find(item => item.id === client.id)!.bookends![0].active, false);
+  await assert.rejects(f.db.query("UPDATE be_clients SET bookends='{}'::jsonb WHERE id=$1", [client.id]), code("23514"));
+  assert.deepEqual((await f.load(f.foreign)).clients, []);
+});
+
 test("HOME and client scope cannot rewrite existing journey history, while archived journeys stay visible", async t => {
   const f=await fixture();t.after(()=>f.db.close());
   const current=await f.journey();

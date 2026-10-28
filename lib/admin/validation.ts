@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { engagementPlanSchema, profileSchema } from "./engagement";
+import { clientBookendsSchema } from "../scheduling/client-bookends";
 
 const id = z.uuid();
 const text = (max = 2000) => z.string().trim().min(1).max(max).refine(value => !value.includes("\u0000"), "Text cannot contain null characters.");
@@ -28,7 +29,7 @@ export const adminRequestSchema = z.object({
   idempotencyKey: id,
   command: z.discriminatedUnion("type", [
     z.object({ type: z.literal("set_organization"), name: text(200), expectedRevision: revision }).strict(),
-    z.object({ type: z.literal("save_client"), ...identity, name: text(160), code: text(80), contactName: optionalText(160), contactEmail: z.union([z.literal(""), z.email().max(254)]), notes: optionalText(4000) }).strict(),
+    z.object({ type: z.literal("save_client"), ...identity, name: text(160), code: text(80), contactName: optionalText(160), contactEmail: z.union([z.literal(""), z.email().max(254)]), notes: optionalText(4000), bookends: clientBookendsSchema.optional() }).strict(),
     z.object({ type: z.literal("set_client_active"), ...toggle }).strict(),
     z.object({ type: z.literal("save_home"), ...identity, code: text(80), name: text(160), description: optionalText(2000) }).strict(),
     z.object({ type: z.literal("set_home_active"), ...toggle }).strict(),

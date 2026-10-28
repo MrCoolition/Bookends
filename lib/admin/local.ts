@@ -8,6 +8,7 @@ import { capabilityAliasesAfterRename, capabilityNameKey, capabilitySchema, enga
 import { plannedTeamReferenceIssues } from "../studio/team";
 import { forecastReferenceIssues, forecastWorkspaceSchema, saveForecastCommandSchema } from "../forecast/validation";
 import type { ForecastWorkspace } from "../forecast/types";
+import { clientBookendsSchema } from "../scheduling/client-bookends";
 
 /** Browser-local configuration only. These records never establish an authenticated identity or permission. */
 export type LocalAdminStore = { version: 1; revision: number; clientSeedVersion?: 1; data: AdminBootstrap };
@@ -53,7 +54,7 @@ const storeSchema = z.object({
   version: z.literal(1), revision: rev, clientSeedVersion: z.literal(1).optional(), data: z.object({
     organization: z.object({ id: z.literal(LOCAL_ADMIN_ORGANIZATION_ID), name: text(200), revision: rev }).strict(),
     viewer: z.object({ id: z.literal(LOCAL_ADMIN_OWNER_ID), name: text(160) }).strict(),
-    clients: z.array(z.object({ ...recordFields, name: text(160), code: text(80), contactName: optionalText(160), contactEmail: z.union([z.literal(""), z.email().max(254)]), notes: optionalText(4000) }).strict()).max(MAX_RECORDS),
+    clients: z.array(z.object({ ...recordFields, name: text(160), code: text(80), contactName: optionalText(160), contactEmail: z.union([z.literal(""), z.email().max(254)]), notes: optionalText(4000), bookends: clientBookendsSchema.optional() }).strict()).max(MAX_RECORDS),
     homes: z.array(z.object({ ...recordFields, code: text(80), name: text(160), description: optionalText(2000) }).strict()).max(MAX_RECORDS),
     resources: z.array(z.object({ ...recordFields, name: text(160), home: optionalText(80), ownerId: planningOwnerId, profile: profileSchema.optional() }).strict()).max(MAX_RECORDS),
     missions: z.array(z.object({ ...recordFields, name: text(160), clientId: id, engagement: engagementPlanSchema.optional() }).strict()).max(MAX_RECORDS),
@@ -223,7 +224,8 @@ export function applyLocalAdminCommand(input: LocalAdminStore, raw: LocalAdminCo
       const record = command.id ? current(data.clients, command.id, command.expectedRevision) : null;
       ensure(!record || record.code === command.code, "immutable_code", "Keep the stable client code; edit its display name instead.");
       ensure(!data.clients.some(client => client.code === command.code && client.id !== record?.id), "duplicate", "That client code already exists.");
-      const value = { id: record?.id ?? crypto.randomUUID(), name: command.name, code: command.code, contactName: command.contactName, contactEmail: command.contactEmail, notes: command.notes, active: record?.active ?? true, revision: (record?.revision ?? 0) + 1 };
+      const bookends = command.bookends ?? record?.bookends;
+      const value = { id: record?.id ?? crypto.randomUUID(), name: command.name, code: command.code, contactName: command.contactName, contactEmail: command.contactEmail, notes: command.notes, active: record?.active ?? true, revision: (record?.revision ?? 0) + 1, ...(bookends ? { bookends } : {}) };
       if (record) Object.assign(record, value); else data.clients.push(value); break;
     }
     case "save_home": {

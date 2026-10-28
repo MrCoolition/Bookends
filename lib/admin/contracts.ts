@@ -1,8 +1,9 @@
 import type { JourneyKind, JourneyRole, JourneyTemplate, PermissionScope, RequirementTemplate } from "../journeys/types";
 import type { EngagementPlan, ResourceProfile } from "./engagement";
 import type { ForecastWorkspace } from "../forecast/types";
+import type { ClientBookend } from "../scheduling/client-bookends";
 
-export type AdminClient = { id: string; name: string; code: string; contactName: string; contactEmail: string; notes: string; active: boolean; revision: number };
+export type AdminClient = { id: string; name: string; code: string; contactName: string; contactEmail: string; notes: string; active: boolean; revision: number; bookends?: ClientBookend[] };
 export type AdminHome = { id: string; code: string; name: string; description: string; active: boolean; revision: number };
 export type AdminResource = { id: string; name: string; home: string; ownerId: string; active: boolean; revision: number; profile?: ResourceProfile };
 export type AdminMission = { id: string; name: string; clientId: string; active: boolean; revision: number; engagement?: EngagementPlan };
@@ -29,7 +30,7 @@ type Toggle = { id: string; expectedRevision: number; active: boolean };
 type MemberFields = { name: string; role: JourneyRole; resourceId: string | null; homeScope: string | null; grants: AdminGrant[] };
 export type AdminCommand =
   | { type: "set_organization"; name: string; expectedRevision: number }
-  | (EditIdentity & { type: "save_client"; name: string; code: string; contactName: string; contactEmail: string; notes: string })
+  | (EditIdentity & { type: "save_client"; name: string; code: string; contactName: string; contactEmail: string; notes: string; bookends?: ClientBookend[] })
   | (Toggle & { type: "set_client_active" })
   | (EditIdentity & { type: "save_home"; code: string; name: string; description: string })
   | (Toggle & { type: "set_home_active" })

@@ -1,6 +1,8 @@
 import type { AdminBootstrap, AdminResource } from "../admin/contracts";
 import { isEngagementDate } from "../admin/engagement";
 import { createCapabilityResolver } from "../admin/capability-resolution";
+import { evaluateClientBookends } from "../scheduling/client-bookends";
+import { needsTimingChange } from "../scheduling/engagement-bookends";
 import { emptyForecast, type ForecastCandidate, type ForecastMonth, type ForecastResult, type ForecastRoleResult, type ForecastScenario } from "./types";
 
 const DAY = 86_400_000;
@@ -39,6 +41,17 @@ export function analyzeForecast(data: AdminBootstrap, scenario: ForecastScenario
   if (noSkills) warningSet.add(`${noSkills} active teammate${noSkills === 1 ? " has" : "s have"} no skills recorded. Missing skills are not assumed to match.`);
   const selections = new Map(scenario.selections.map(selection => [selection.missionId, selection]));
   const matchCache = new Map<string, AdminResource[]>();
+  const timingCache = new Map<string, ReturnType<typeof evaluateClientBookends>>();
+  const timingFor = (client: AdminBootstrap["clients"][number], date: string, phase: "start" | "end", readyOn: string) => {
+    const key = JSON.stringify([client.id, date, phase, readyOn]);
+    let evaluation = timingCache.get(key);
+    if (!evaluation) {
+      if (timingCache.size >= 500) throw tooLarge();
+      evaluation = evaluateClientBookends(client.bookends, date, { phase, readyOn });
+      timingCache.set(key, evaluation);
+    }
+    return evaluation;
+  };
   let matchingChecks = 0;
   const demand: Demand[] = [];
   const baselines = new Set<string>(), potentials = new Set<string>();
@@ -50,9 +63,20 @@ export function analyzeForecast(data: AdminBootstrap, scenario: ForecastScenario
     const selection = selections.get(mission.id);
     if (!baseline && (!potential || !selection?.included)) continue;
     const shift = baseline ? 0 : selection!.shiftDays, scale = baseline ? 1 : selection!.teamScale;
+    const client = data.clients.find(client => client.id === mission.clientId)!;
+    // Notice is conservatively checked from planning start (or a later expected
+    // close). A previously booked window still needs confirmation with the client.
+    const readyOn = !baseline && plan.pipeline?.expectedClose && plan.pipeline.expectedClose > asOf ? plan.pipeline.expectedClose : asOf;
     for (const role of plan.roles) {
       const first = shiftForecastDate(role.start, shift), last = shiftForecastDate(role.end, shift);
       if (time(last) < startTime || time(first) >= horizon) continue;
+      const clientTiming = client.bookends?.some(rule => rule.active) ? {
+        start: timingFor(client, first, "start", readyOn),
+        end: timingFor(client, last, "end", readyOn), readyOn,
+      } : undefined;
+      if (clientTiming && (needsTimingChange(clientTiming.start) || needsTimingChange(clientTiming.end))) {
+        warningSet.add(`${client.name} · ${mission.name}: client timing needs review. Demand stays on the planned dates until you explicitly change the scenario; confirm any existing client booking.`);
+      }
       if (data.capabilities?.some(item => item.kind === "role") && resolver.resolve("role", role.name).status !== "resolved") {
         warningSet.add(`“${role.name}” is not aligned to a unique workspace role. Review the role mapping before a hiring decision.`);
       }
@@ -69,7 +93,7 @@ export function analyzeForecast(data: AdminBootstrap, scenario: ForecastScenario
         clientName: data.clients.find(client => client.id === mission.clientId)?.name ?? "Client", roleId: role.id, roleName: role.name,
         baseline, start: first, end: last, seats: Math.ceil(role.headcount * scale), allocationPercent: role.allocationPercent, skills: role.skills,
         confidence: baseline ? null : plan.pipeline!.confidence, confirmedSeats: 0, unknownSeats: 0, hiringGapSeats: 0, firstGapDate: null, hireBy: null,
-        candidates: [], from: Math.max(startTime, time(first)), until: Math.min(horizon, time(last) + DAY), matches, seen: false, candidateMinimum: new Map(), candidateReservedMinimum: new Map() });
+        candidates: [], ...(clientTiming ? { clientTiming } : {}), from: Math.max(startTime, time(first)), until: Math.min(horizon, time(last) + DAY), matches, seen: false, candidateMinimum: new Map(), candidateReservedMinimum: new Map() });
       (baseline ? baselines : potentials).add(mission.id);
     }
   }

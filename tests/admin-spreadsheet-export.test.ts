@@ -54,7 +54,7 @@ const workbookFile = (bytes: Uint8Array) => new File([bytes.slice().buffer], "BO
 test("full workspace export includes inactive records, stable identities and every reference section", () => {
   const store = fixture(), before = structuredClone(store), book = workspaceSpreadsheetData(store);
   assert.deepEqual(store, before);
-  assert.equal(book.sheets.length, 15);
+  assert.equal(book.sheets.length, 16);
   assert.equal(values(book, "People").length, 3);
   assert.equal(values(book, "People")[2].Active, "false");
   assert.equal(values(book, "People")[0]["Record ID"], id(5));
@@ -88,7 +88,7 @@ test("generated XLSX is readable, formatted for batch editing, formula-safe and 
   assert.ok(bytes.byteLength > 1000);
   const { default: ExcelJS } = await import("exceljs"), excel = new ExcelJS.Workbook();
   await excel.xlsx.load(bytes.buffer as Parameters<typeof excel.xlsx.load>[0]);
-  assert.equal(excel.worksheets.length, 15);
+  assert.equal(excel.worksheets.length, 16);
   const people = excel.getWorksheet("People")!;
   assert.equal(people.views[0].state, "frozen");
   assert.equal("ySplit" in people.views[0] && people.views[0].ySplit, 4);

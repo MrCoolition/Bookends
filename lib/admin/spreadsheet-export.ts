@@ -28,6 +28,7 @@ export function workspaceSpreadsheetData(store: LocalAdminStore): SpreadsheetWor
   const engagements = data.missions.filter(mission => mission.engagement);
   const editable = [
     dataSheet("Clients", data.clients.map(client => ({ ...identity(client), "Client code": client.code, "Client name": client.name, "Contact name": client.contactName, "Contact email": client.contactEmail, Notes: client.notes }))),
+    dataSheet("Client bookends", data.clients.flatMap(client => (client.bookends ?? []).map(rule => ({ "Client code": client.code, "Bookend name": rule.name, Purpose: rule.purpose, Phase: rule.phase, Enforcement: rule.enforcement, Cadence: rule.cadence, Every: rule.every, "Anchor date": rule.anchorDate, "Window days": rule.windowDays, "Notice days": rule.noticeDays, "Until date": rule.until ?? "", "Excluded dates": formatNamedList(rule.excludedDates ?? []), Notes: rule.notes, "Rule ID": rule.id, "Client ID": client.id, Revision: client.revision, Active: stringBoolean(rule.active) })))),
     dataSheet("People", data.resources.map(person => ({ ...identity(person), "Person name": person.name, "HOME code": person.home, "Owner name": memberName(person.ownerId), "Delivery roles": formatNamedList(person.profile?.roles ?? []), Skills: formatNamedList(person.profile?.skills ?? []), Designation: person.profile?.affiliation === "impower" ? "Impower" : person.profile?.affiliation === "contractor" ? "Contractor" : "" }))),
     dataSheet("Engagements", engagements.map(mission => {
       const plan = mission.engagement!;
@@ -72,13 +73,14 @@ export function workspaceSpreadsheetData(store: LocalAdminStore): SpreadsheetWor
       ["Export → Edit in Excel → Import → Review → Apply"],
       [`Workspace revision ${store.revision} · ${data.organization.name} · ${data.asOf}`],
       ["Step", "What to do"],
-      ["1. Edit the populated tabs", "Clients, People, Engagements, Engagement roles, Roles, Skills, HOMEs and Missions contain all saved records, including inactive records. Headers stay on row 4; data starts on row 5."],
+      ["1. Edit the populated tabs", "Clients, Client bookends, People, Engagements, Engagement roles, Roles, Skills, HOMEs and Missions contain all saved records, including inactive records. Headers stay on row 4; data starts on row 5."],
       ["2. Keep record identity", "Keep Record ID, Role ID, Engagement ID and Revision unchanged. Keep client and HOME codes stable. IDs let you rename existing records without creating duplicates."],
       ["3. Add or archive", "For new rows leave IDs and Revision blank. Active is true or false: false archives a record, true restores it where references allow. Removing a row from Excel never deletes it from BOOKENDS."],
       ["4. Use plain values", "Dates use YYYY-MM-DD. Separate multiple roles, skills or selected people IDs with commas; put a value containing a comma in double quotes. No formulas. Blank optional cells clear editable values; omitted columns preserve them."],
       ["People links", "With a Record ID, clearing HOME code or Owner name removes that person's link; removing the entire column preserves it. Legacy imports without Record IDs keep existing HOME and owner links when those cells are blank."],
       ["5. Review before applying", "Import Excel to see adds, updates, unchanged records and validation errors. Nothing saves until you apply the preview. If an exported record changed in BOOKENDS, download a fresh export and reapply your edits."],
       ["Engagements & team choices", "Engagement roles use stable Role ID and Engagement ID. Selected people IDs are proposed teammates, not staffing assignments. Team selections lists their names. Source is direct or sow; blank retains the legacy SOW interpretation."],
+      ["Client bookends", "One timing window per row. Keep Rule ID, Client ID, client code and Revision for updates. New rules leave Rule ID blank but retain the existing client's Revision. Set Active to false to disable a rule. Missing rows or an empty sheet preserve all rules. Every is a count of days, weeks or months; use 1 for once. Window days and Notice days are calendar days. Excluded dates use YYYY-MM-DD separated by commas."],
       ["Reference sheets", "Workspace, Members, Playbooks, Requirements, SOW notes and Team selections include settings, access, policy approvals, evidence and readable team choices. These tabs are reference only; edits are ignored during import. Use Administration to change them."],
       ["Potential SOWs", "Pipeline stage, Confidence % and Expected close are editable on Engagements. Keep potential SOWs in draft status. Forecast, Capacity, Commitments and Scenarios tabs capture saved what-if planning when present; edit those records in What if."],
       ["Complete restoration", "Excel is for reviewed batch editing. Keep a JSON backup for restoring the complete workspace, including reference-only settings and approvals. Credentials and sign-in sessions are never included."],
@@ -171,11 +173,11 @@ export async function exportWorkspaceSpreadsheet(store: LocalAdminStore): Promis
         // Explicit strings stay strings, even when user content starts with =, +, - or @.
         if (typeof cell.value === "string") cell.numFmt = "@";
         else if (typeof cell.value === "number") cell.numFmt = Number.isInteger(cell.value) ? "0" : "0.########";
-        if (rowIndex > 4 && /^(Record ID|Role ID|Engagement ID|Revision)$/.test(headers[column - 1])) cell.font = { name: "Aptos", size: 10, color: { argb: "FF6D7890" } };
+        if (rowIndex > 4 && /^(Record ID|Role ID|Engagement ID|Rule ID|Client ID|Revision)$/.test(headers[column - 1])) cell.font = { name: "Aptos", size: 10, color: { argb: "FF6D7890" } };
       });
     }
     if (!guide) sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(4, sheet.rowCount), column: headers.length } };
-    if (editable) for (const [header, choices] of Object.entries({ Active: "true,false", Designation: "Impower,Contractor", Status: "draft,signed,complete", Source: "direct,sow" })) {
+    if (editable) for (const [header, choices] of Object.entries({ Active: "true,false", Designation: "Impower,Contractor", Status: "draft,signed,complete", Source: "direct,sow", Purpose: "onboarding,offboarding,access,review,custom", Phase: "start,end", Enforcement: "required,advisory", Cadence: "once,days,weeks,months" })) {
       const column = headers.indexOf(header) + 1;
       if (!column) continue;
       for (let row = 5; row <= Math.min(1004, Math.max(29, item.rows.length + 10)); row++) sheet.getCell(row, column).dataValidation = { type: "list", allowBlank: true, formulae: [`"${choices}"`], showErrorMessage: true, errorStyle: "stop", errorTitle: `Choose a ${header.toLowerCase()}`, error: `Use ${choices.split(",").join(" or ")}, or leave blank.` };

@@ -77,6 +77,7 @@ const sheetSpecs = [
   { name: 'Engagement roles', title: 'Engagement roles / your delivery team', note: 'One row per role. Enter allocation as 100 for full-time or 50 for half-time. Blank dates use engagement dates.', headers: ['Engagement name', 'Client code', 'Role name', 'Headcount', 'Allocation %', 'Skills', 'Responsibilities', 'Start date', 'End date'], widths: [35, 20, 30, 17, 20, 44, 60, 18, 18], required: [0,1,2,3,4] },
   { name: 'Roles', title: 'Delivery roles / your role catalog', note: 'Define the delivery roles your business uses. Name is required; Description is optional.', headers: ['Name', 'Description'], widths: [48, 86], required: [0] },
   { name: 'Skills', title: 'Skills / your skills catalog', note: 'Define the skills your business uses. Name is required; Description is optional.', headers: ['Name', 'Description'], widths: [48, 86], required: [0] },
+  { name: 'Client bookends', title: 'Client bookends / timing windows', note: 'One window per row. Existing clients need their exported Revision. Leave Rule ID blank for new windows. Active=false disables a window.', headers: ['Client code', 'Bookend name', 'Purpose', 'Phase', 'Enforcement', 'Cadence', 'Every', 'Anchor date', 'Window days', 'Notice days', 'Until date', 'Excluded dates', 'Notes', 'Rule ID', 'Client ID', 'Revision', 'Active'], widths: [22, 34, 22, 18, 22, 20, 15, 20, 19, 19, 20, 40, 52, 42, 42, 16, 16], required: [0,1,2,3,4,5,6,7,8,9] },
 ];
 
 const guide = workbook.worksheets.add('Start here');
@@ -84,7 +85,7 @@ for (const spec of sheetSpecs) workbook.worksheets.add(spec.name);
 
 guide.showGridLines = false;
 guide.tabColor = color.cobalt;
-guide.getRange('A1:F53').format = { fill: color.paper, font: { name: 'Arial', size: 11, color: color.ink }, verticalAlignment: 'center', rowHeight: 24 };
+guide.getRange('A1:F63').format = { fill: color.paper, font: { name: 'Arial', size: 11, color: color.ink }, verticalAlignment: 'center', rowHeight: 24 };
 guide.getRange('A1:A34').format.columnWidth = 4;
 guide.getRange('B1:B34').format.columnWidth = 23;
 guide.getRange('C1:C34').format.columnWidth = 27;
@@ -189,6 +190,26 @@ guide.getRange('B52').values = [['Names with punctuation']];
 guide.getRange('C52').values = [['Quote names containing separators, for example: SQL; "Cloud (AWS, Azure)".']];
 guide.getRange('B49:B52').format.font = { name: 'Arial', size: 11, bold: true, color: color.ink };
 guide.getRange('C49:E52').format.font.color = color.muted;
+guide.getRange('B54').values = [['Client timing windows']];
+guide.getRange('B54:E54').format = { fill: color.cobalt, font: { name: 'Arial', size: 11, bold: true, color: color.white }, rowHeight: 28 };
+guide.getRange('B55').values = [['Every two weeks']];
+guide.getRange('C55').values = [['Cadence=weeks, Every=2. Set Anchor date to the first eligible intake day.']];
+guide.getRange('B56').values = [['Window / notice']];
+guide.getRange('C56').values = [['Window days counts eligible calendar days. Notice days is lead time before opening.']];
+guide.getRange('B57').values = [['Purpose / phase']];
+guide.getRange('C57').values = [['Onboarding, offboarding, access, review or custom. Phase applies at start or end.']];
+guide.getRange('B58').values = [['Requirements']];
+guide.getRange('C58').values = [['Required windows constrain planning. Advisory windows provide context.']];
+guide.getRange('B59').values = [['Dates / exceptions']];
+guide.getRange('C59').values = [['Until date limits the schedule. Excluded dates: YYYY-MM-DD, separated by commas.']];
+guide.getRange('B60').values = [['Existing clients']];
+guide.getRange('C60').values = [['Use Export Excel for current client Revision. Keep Rule ID and Client ID for updates.']];
+guide.getRange('B61').values = [['New clients']];
+guide.getRange('C61').values = [['Add the client on Clients. Match its code; leave Rule ID, Client ID and Revision blank.']];
+guide.getRange('B62').values = [['Disable / preserve']];
+guide.getRange('C62').values = [['Set Active=false to disable. Missing rows or an empty sheet never remove windows.']];
+guide.getRange('B55:B62').format.font = { name: 'Arial', size: 11, bold: true, color: color.ink };
+guide.getRange('C55:E62').format.font.color = color.muted;
 
 for (const spec of sheetSpecs) {
   const sheet = workbook.worksheets.getItem(spec.name);
@@ -222,6 +243,15 @@ for (const spec of sheetSpecs) {
     sheet.getRange('D5:D1004').dataValidation = { rule: { type: 'whole', operator: 'between', formula1: 1, formula2: 1000 } };
     sheet.getRange('E5:E1004').dataValidation = { rule: { type: 'decimal', operator: 'between', formula1: 1, formula2: 100 } };
   }
+  if (spec.name === 'Client bookends') {
+    sheet.getRange('H5:H1004').format.numberFormat = 'mm/dd/yyyy';
+    sheet.getRange('K5:K1004').format.numberFormat = 'mm/dd/yyyy';
+    for (const [column, maximum, minimum] of [['G',366,1], ['I',90,1], ['J',365,0]]) {
+      sheet.getRange(`${column}5:${column}1004`).format.numberFormat = '0';
+      sheet.getRange(`${column}5:${column}1004`).dataValidation = { rule: { type: 'whole', operator: 'between', formula1: minimum, formula2: maximum } };
+    }
+    for (const [column, values] of [['C',['onboarding','offboarding','access','review','custom']], ['D',['start','end']], ['E',['required','advisory']], ['F',['once','days','weeks','months']], ['Q',['true','false']]]) sheet.getRange(`${column}5:${column}1004`).dataValidation = { rule: { type: 'list', values } };
+  }
 }
 
 workbook.names.add('BookendsHomeCodes', "='HOMEs'!$A$5:$A$1004");
@@ -231,15 +261,16 @@ workbook.worksheets.getItem('People').getRange('F5:F1004').dataValidation = { ru
 workbook.worksheets.getItem('Missions').getRange('B5:B1004').dataValidation = { rule: { type: 'list', formula1: 'BookendsClientCodes' } };
 workbook.worksheets.getItem('Engagements').getRange('B5:B1004').dataValidation = { rule: { type: 'list', formula1: 'BookendsClientCodes' } };
 workbook.worksheets.getItem('Engagement roles').getRange('B5:B1004').dataValidation = { rule: { type: 'list', formula1: 'BookendsClientCodes' } };
+workbook.worksheets.getItem('Client bookends').getRange('A5:A1004').dataValidation = { rule: { type: 'list', formula1: 'BookendsClientCodes' } };
 workbook.worksheets.getItem('Engagements').getRange('D5:D1004').dataValidation = { rule: { type: 'list', values: ['draft', 'signed', 'complete'] } };
 
 workbook.recalculate();
 await fs.mkdir(previews, { recursive: true });
 for (const name of ['Start here', ...sheetSpecs.map(s => s.name)]) {
-  const range = name === 'Start here' ? 'A1:F53' : `A1:${String.fromCharCode(64 + sheetSpecs.find(s => s.name === name).headers.length)}13`;
+  const range = name === 'Start here' ? 'A1:F63' : `A1:${String.fromCharCode(64 + sheetSpecs.find(s => s.name === name).headers.length)}13`;
   const check = await workbook.inspect({ kind: 'table', range: `'${name}'!${name === 'Start here' ? 'B18:E24' : 'A4:E6'}`, include: 'values,formulas', tableMaxRows: 7, tableMaxCols: 5, maxChars: 1600 });
   console.log(check.ndjson);
-  if ((!process.argv.includes('--guide-only-render') && !process.argv.includes('--people-guide-render')) || name === 'Start here' || (process.argv.includes('--people-guide-render') && name === 'People')) {
+  if ((!process.argv.includes('--guide-only-render') && !process.argv.includes('--people-guide-render') && !process.argv.includes('--bookends-guide-render')) || name === 'Start here' || (process.argv.includes('--people-guide-render') && name === 'People') || (process.argv.includes('--bookends-guide-render') && name === 'Client bookends')) {
     const render = await workbook.render({ sheetName: name, range, scale: 1.5, format: 'png' });
     await fs.writeFile(`${previews}/${name.replaceAll(' ', '-')}.png`, new Uint8Array(await render.arrayBuffer()));
   }

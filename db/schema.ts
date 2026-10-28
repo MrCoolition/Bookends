@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Journey, JourneyActor, JourneyKind, JourneyRole, JourneyTemplate, BaggageObligation, ObligationStatus } from "../lib/journeys/types";
 import type { EngagementPlan, ResourceProfile } from "../lib/admin/engagement";
+import type { ClientBookend } from "../lib/scheduling/client-bookends";
 
 const audit = () => ({ createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(), updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow() });
 const revision = () => integer("revision").notNull().default(1);
@@ -9,7 +10,7 @@ const revision = () => integer("revision").notNull().default(1);
 export const organizations = pgTable("be_organizations", { id: uuid("id").primaryKey(), name: text("name").notNull(), revision: revision(), ...audit() });
 export const clients = pgTable("be_clients", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id), id: uuid("id").notNull(), code: text("code").notNull(), name: text("name").notNull(),
-  contactName: text("contact_name"), contactEmail: text("contact_email"), notes: text("notes").notNull().default(""), active: boolean("active").notNull().default(true), revision: revision(), ...audit(),
+  contactName: text("contact_name"), contactEmail: text("contact_email"), notes: text("notes").notNull().default(""), bookends: jsonb("bookends").$type<ClientBookend[]>(), active: boolean("active").notNull().default(true), revision: revision(), ...audit(),
 }, table => [primaryKey({ columns: [table.organizationId, table.id] }), unique().on(table.organizationId, table.code)]);
 export const homes = pgTable("be_homes", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id), id: uuid("id").notNull(), code: text("code").notNull(), name: text("name").notNull(), description: text("description").notNull().default(""), active: boolean("active").notNull().default(true), revision: revision(), ...audit(),

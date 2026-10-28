@@ -1,3 +1,4 @@
+import type { ClientTimingAssessment } from "../scheduling/engagement-bookends";
 /** Planning facts and hypotheses. None of these records authorize staffing. */
 export type PipelineStage = "exploring" | "qualified" | "proposal" | "negotiation" | "lost";
 export type ForecastScenario = { id: string; name: string; selections: { missionId: string; included: boolean; shiftDays: number; teamScale: number }[]; hiringLeadWeeks: number; asOf?: string; horizonMonths?: number };
@@ -11,6 +12,7 @@ export type ForecastRoleResult = {
   start: string; end: string; seats: number; allocationPercent: number; skills: string[]; confidence: number | null;
   confirmedSeats: number; unknownSeats: number; hiringGapSeats: number; firstGapDate: string | null; hireBy: string | null;
   candidates: ForecastCandidate[];
+  clientTiming?: { start: ClientTimingAssessment; end: ClientTimingAssessment; readyOn: string };
 };
 export type ForecastSummary = { potentialCount: number; baselineCount: number; peakDemandFte: number; peakHiringGapFte: number; hiringGapSeats: number; unknownCapacityPeople: number; confirmedCapacityPeople: number; firstHireBy: string | null };
 export type ForecastResult = { asOf: string; months: ForecastMonth[]; roles: ForecastRoleResult[]; summary: ForecastSummary; warnings: string[]; method: string };
